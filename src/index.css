@@ -1,0 +1,37 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Google Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/google-sans-medium.woff2') format('woff2');
+}
+
+@theme inline {
+  --color-background: #f6f7f2;
+  --color-foreground: #163a32;
+  --color-primary: #184d3f;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #e8eee7;
+  --color-muted-foreground: #5c7168;
+  --color-border: #d9e2da;
+  --color-ring: #237a59;
+  --font-google: 'Google Sans', Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    margin: 0;
+    min-width: 280px;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button:not(:disabled),
+  select {
+    cursor: pointer;
+  }
+}
