@@ -69,6 +69,25 @@ for (const suffix of [
   });
 }
 
+test('callback with a code but no PKCE verifier offers recovery without a token request', async ({
+  page,
+  auth,
+}) => {
+  await page.goto('/auth/callback?code=synthetic-code');
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveText(
+    'We could not complete sign-in. Please start again.',
+  );
+  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
+  await expect(page.getByRole('link', { name: 'Back' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back' })).toHaveAttribute('href', '/');
+  await expect(page).toHaveURL('http://127.0.0.1:4173/auth/callback');
+  await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
+  await expect(page.getByText('person@example.test')).toHaveCount(0);
+  expect(auth.exchanges).toBe(0);
+});
+
 test('direct callback entry and unknown routes recover to the root shell', async ({ page }) => {
   await page.goto('/auth/callback');
   await expect(page.getByRole('alert')).toContainText('unavailable or has expired');
