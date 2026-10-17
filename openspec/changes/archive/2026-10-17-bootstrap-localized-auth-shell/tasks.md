@@ -1,0 +1,49 @@
+# Tasks
+
+## 1. Application and toolchain foundation
+
+- [x] 1.1 Bootstrap React/TypeScript/Vite with Node 24, an exact pnpm package-manager version, pinned dependencies, and `pnpm-lock.yaml`; verify a clean `pnpm install --frozen-lockfile` and initial production build with synthetic public configuration.
+- [x] 1.2 Add Tailwind's Vite integration, the minimal shadcn setup, and React Router routes for `/` and `/auth/callback`; pin the development port to 5173 with `strictPort`. Verify direct route loading and failure instead of automatic port switching when 5173 is occupied.
+- [x] 1.3 Add Prettier, ESLint/TypeScript/React Hooks rules, explicit type checking, Vitest/React Testing Library configuration, and documented developer commands. Verify `format:check`, `lint`, and `typecheck` pass on the foundation; later tasks add meaningful tests alongside behavior.
+- [x] 1.4 Preserve the existing OpenSpec initialization and list it in eventual PR scope: `openspec/config.yaml`, `openspec/specs/.gitkeep`, `openspec/changes/archive/.gitkeep`, all existing `.agents/skills/openspec-*` files, `.agents/skills/.openspec-target`, and this entire scaffolded change. Verify the file inventory and ignore rules include them without staging or committing anything.
+
+## 2. Public configuration and localization
+
+- [x] 2.1 Add the shared two-variable configuration validator, Vite startup/build validation, safe browser error handling, environment ignore rules, and placeholder-only `.env.example`; document local configuration. Verify unit cases for missing/invalid URLs and unsafe key types, and verify invalid startup/build commands fail without printing values.
+- [x] 2.2 Implement the locale resolver and guarded explicit-only preference persistence. Verify unit cases for ordered preferences, all Portuguese variants including `pt-PT`, English fallback, invalid stored values, storage failures, and device reevaluation without a saved choice; confirm detection never writes a preference.
+- [x] 2.3 Bundle English/Brazilian Portuguese resources and typed selector access with i18next/react-i18next. Verify `test:unit` checks leaf-key/interpolation parity, nonempty resources, and English missing/empty-key fallback; verify `typecheck` includes a fixture proving unknown keys are rejected.
+- [x] 2.4 Add the shared language selector, pre-render localization initialization, document title/language updates, and localized status/accessibility text; document preference semantics. Verify component tests for immediate switching, first-render readiness, unavailable preference storage, and translated existing error feedback.
+
+## 3. Authentication shell and callback
+
+- [x] 3.1 Create the singleton Supabase client and session provider/hook with explicit PKCE options, subscribe-before-read initialization, ordered event updates, and effect cleanup. Verify unit/component tests for no login flash, initial-session handling, late-result races, repeated events, refresh/user-update notifications, restoration errors, and cleanup under Strict Mode.
+- [x] 3.2 Build the minimal signed-out/signed-in views and Google/local-sign-out actions with identity/image fallbacks and accessible pending/error states. Verify component tests assert the exact allowed content, Google/redirect options, local sign-out scope, language preservation, safe text rendering, and failure recovery.
+- [x] 3.3 Implement `/auth/callback` with shared single-exchange ownership, query/fragment error mapping, URL replacement/scrubbing, and fresh-login/return recovery. Verify automated tests for successful completion, duplicate mounts, provider cancellation, missing/expired/reused code, missing verifier, network failure, signup-disabled rejection of a synthetic unknown identity, preservation of an existing valid session on failure, and an unguarded callback during session initialization.
+- [x] 3.4 Write the development-provider setup and final smoke-test runbook: exact local callback, distinct Supabase/Google redirects, basic scopes and Google's testing-mode exception, other providers disabled, and no production configuration. Specify signups enabled through the first successful PM Google authentication, Auth confirmation and inventory review before disabling, and a stop for PM resolution of unexpected identities without automatic deletion. Preserve recovery that keeps signups enabled if enrollment fails before the PM exists, or temporarily re-enables them if disabled prematurely, then confirms the PM and resolves inventory review before disabling again. Use disabled signups and PM-only Auth inventory as operational restriction evidence. Limit final manual application acceptance to PM sign-in, authenticated-screen confirmation, sign-out, and signed-out Google-login-screen confirmation. Verify the runbook assigns restoration/reload, language persistence, cancellation/recovery, and unknown-user handling to automated tests; requires no second identity; never blocks initial PM enrollment; and contains no real account details/credentials.
+
+## 4. Chromium integration checks
+
+- [x] 4.1 Add Playwright Chromium configuration serving the production build, synthetic public configuration, and a few static Auth/network fixtures. Verify one callback journey uses an SDK-created verifier and intercepted authorization/code-exchange responses; assert unexpected Auth requests fail without contacting real Google/Supabase or introducing a fake service/runtime bypass.
+- [x] 4.2 Add focused browser scenarios for both locales, explicit preference through reload and redirect, identity/session reload, callback cancellation/recovery, signup-disabled unknown-user rejection, sign-out, direct callback entry, and keyboard/narrow/wide layouts. Verify `pnpm test:e2e` passes in Chromium using only synthetic identity/token/image and rejection fixtures; document that these checks remain automated and the final PM smoke is only enrolled-identity sign-in/sign-out and confirmation of the two screens.
+
+## 5. First-PR automation
+
+- [x] 5.1 Add one Linux GitHub Actions job for PRs/default-branch pushes with Node 24, pinned pnpm, frozen install, formatting, linting, type checking, unit tests, production build, Chromium installation/browser tests, and a lightweight secret scan. Verify workflow syntax, read-only permissions, pinned actions, timeout/cancellation, synthetic environment values, and sanitized failure artifacts; add no deployment or real-login job.
+- [x] 5.2 Document clean-checkout setup, all check commands, Chromium as the only required browser, scope/non-goals, and manual acceptance ownership. Verify the documented automated command sequence succeeds locally with synthetic configuration and record that hosted Actions execution awaits the eventual PR rather than opening one in this task.
+
+## 6. Final integration and manual acceptance
+
+- [x] 6.1 Re-run the complete automated checks and strict OpenSpec validation, then inspect the eventual PR file inventory and generated build for scope leaks and secrets. Verify the existing initialization files are included, all required checks pass, and no excluded feature, real credential/token, production callback, or deployment configuration was introduced.
+- [x] 6.2 With the PM, complete development-provider setup with **Allow new users to sign up** enabled until the first successful Google authentication. Confirm the PM identity in Supabase Auth and inspect for unexpected identities; if any exist, stop for PM resolution without automatic deletion. Disable signups only after the PM identity is confirmed and inventory findings are resolved. If enrollment fails before the PM exists, keep signups enabled while correcting OAuth; if disabled prematurely, temporarily re-enable them, enroll and confirm the PM, resolve the inventory review, and disable again. Verify Google remains in testing mode, other providers are disabled, and the exact callback is `http://localhost:5173/auth/callback`. Record disabled signups and the PM-only Auth inventory as operational evidence that new identities cannot enroll; no second-identity login is required. Prepare the signed-out application state for task 6.3 and never leave initial PM enrollment blocked by the signup setting.
+- [x] 6.3 As the final PM manual application smoke after task 6.2, perform only these four steps at `http://localhost:5173` with signups disabled throughout: (1) sign in with the enrolled PM Google identity; (2) confirm the minimal authenticated identity screen appears; (3) sign out; (4) confirm the signed-out Google-login screen appears. Record sanitized pass/fail evidence and keep this task incomplete until those four steps pass. No second/unknown identity, cancellation/recovery, language-persistence, or reload check is required from the PM; those application behaviors remain automated, with configuration inspection providing operational enrollment-restriction evidence.
+
+## PM acceptance evidence — 2026-10-17
+
+The PM reported completion of development-provider configuration and manual acceptance:
+
+- Google authentication uses the development Supabase project, local Site URL `http://localhost:5173`, and exact allowed callback `http://localhost:5173/auth/callback`.
+- Initial enrollment succeeded with signups enabled. The Auth inventory contained exactly the intended PM Google identity and no unexpected identities. New signups were then disabled and confirmed disabled.
+- With signups disabled throughout, all four final smoke steps passed: sign in with the enrolled identity, confirm the minimal authenticated screen, sign out, and confirm the signed-out Google-login screen.
+- Actual local configuration remains private in ignored, untracked `.env.local`. No project identifiers, account details, keys, tokens, or session data are recorded here.
+
+This is PM-reported operational and manual acceptance evidence; automated verification is run separately. No second-identity test was required.
