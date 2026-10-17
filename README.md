@@ -2,7 +2,7 @@
 
 An offline-first personal expense tracking PWA. Phase 1 establishes the localized authentication shell.
 
-The PM-owned development enrollment and four-step sign-in/sign-out smoke are in [the authentication runbook](docs/development-auth.md). Tasks 6.2 and 6.3 remain pending until the PM performs them.
+The PM-owned development enrollment and four-step sign-in/sign-out smoke are in [the authentication runbook](docs/development-auth.md). The PM confirmed both complete; sanitized evidence is recorded in the [archived change tasks](openspec/changes/archive/2026-10-17-bootstrap-localized-auth-shell/tasks.md).
 
 Use Node **24.21.0** (see `.node-version`) and **pnpm 10.27.0**.
 
@@ -22,7 +22,7 @@ pnpm build:test
 pnpm exec playwright install chromium
 pnpm test:e2e
 pnpm secret:scan
-openspec validate bootstrap-localized-auth-shell --type change --strict --no-interactive
+openspec validate --all --strict --no-interactive
 ```
 
 `build:test`, `test:unit`, and `test:e2e` explicitly supply synthetic public configuration from `test/config.ts`, overriding local public values. No real Supabase/Google credentials, account information, or session data are used. `test:config` verifies that invalid startup/build configuration fails safely. The OpenSpec CLI must be installed to run its validation command.
@@ -37,8 +37,8 @@ The Phase 1 PR includes the existing `openspec/config.yaml`, spec/archive placeh
 
 Language resolution uses a valid explicit `spendspacey.locale` preference first, then device languages in order, then English. Every Portuguese variant maps to Brazilian Portuguese. Only an explicit language change is persisted; without one, each launch reevaluates the device. Blocked preference storage does not prevent changing the current page language. Both translation resources are bundled and typed; no translation network service is used.
 
-GitHub Actions runs the automated quality/build/Chromium/secret checks in one Linux job on PRs against `main` and pushes to `main`. Its configuration is synthetic, action references are pinned commits, and it performs no deployment. Hosted execution begins with the eventual PR; local verification does not imply that a hosted run has already passed.
+GitHub Actions runs the automated quality/build/Chromium/secret checks in one Linux job on PRs against `main` and pushes to `main`. Its configuration is synthetic, action references are pinned commits, and it performs no deployment.
 
-Phase 1 excludes expense content, dashboards, editable profiles, application database tables/migrations, PWA installation, service workers, Dexie, offline databases/synchronization, deployment, production callbacks, and extra login methods. There is no offline-launch or offline-authentication guarantee. Supabase-managed Auth records are expected. Do not archive the change while PM Tasks 6.2 and 6.3 remain unchecked.
+Phase 1 excludes expense content, dashboards, editable profiles, application database tables/migrations, PWA installation, service workers, Dexie, offline databases/synchronization, deployment, production callbacks, and extra login methods. There is no offline-launch or offline-authentication guarantee. Supabase-managed Auth records are expected. The Phase 1 change is archived with all 19 tasks complete; its capability specifications are in `openspec/specs/`.
 
 The Google sign-in icon and the 23 KB Google Sans Latin font are bundled locally, so rendering the button needs no Google script/font request. Asset sources and licenses are in [third-party notices](docs/third-party-notices.md).
