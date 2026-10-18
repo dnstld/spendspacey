@@ -45,13 +45,13 @@ jobs:
         run: pnpm test:unit
       - name: Invalid configuration checks
         run: pnpm test:config
-      - name: Production build with synthetic configuration
+      - name: Separate localhost test artifact with synthetic configuration
         run: pnpm build:test
-      - name: Synthetic Pages builds and delivery inventory
+      - name: Production, preview, unclassified Pages artifacts and exact header inventory
         run: pnpm test:delivery
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
-      - name: Chromium browser tests
+      - name: Chromium authentication and same-artifact origin enforcement
         run: pnpm test:e2e
       - name: Secret scan (inventory, build, history)
         run: pnpm secret:scan

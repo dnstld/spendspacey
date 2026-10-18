@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// Test harness for this file's exact paths and trailing splats, not a Pages emulator.
-export function pagesHeadersFor(buildDir: string, pathname: string) {
+// Model only our exact paths/trailing splats. Pages matches the path, ignoring query
+// parameters, combines matching custom rules, and otherwise revalidates static files.
+// Hosted behavior still requires the separate PM delivery acceptance.
+export function matchPagesHeaders(source: string, requestPath: string) {
+  const pathname = new URL(requestPath, 'https://synthetic-app.pages.dev').pathname;
   const headers: Record<string, string> = {};
-  const source = readFileSync(resolve(buildDir, '_headers'), 'utf8');
   let matches = false;
   for (const line of source.split('\n')) {
     if (!line.trim() || line.startsWith('#')) continue;
@@ -17,5 +19,9 @@ export function pagesHeadersFor(buildDir: string, pathname: string) {
       headers[name] = headers[name] ? `${headers[name]}, ${value}` : value;
     }
   }
-  return headers;
+  return { 'cache-control': 'public, max-age=0, must-revalidate', ...headers };
+}
+
+export function pagesHeadersFor(buildDir: string, requestPath: string) {
+  return matchPagesHeaders(readFileSync(resolve(buildDir, '_headers'), 'utf8'), requestPath);
 }

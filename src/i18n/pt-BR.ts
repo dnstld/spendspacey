@@ -20,7 +20,7 @@ export const ptBR = {
     unknownEmail: 'E-mail indisponível',
   },
   errors: {
-    previewAuthentication: 'O login com o Google está indisponível nesta prévia.',
+    previewAuthentication: 'O login com o Google está indisponível neste endereço.',
     configuration:
       'Não foi possível iniciar o Spendspacey. Verifique a configuração pública do aplicativo.',
     restore: 'Não foi possível restaurar sua sessão. Tente novamente.',

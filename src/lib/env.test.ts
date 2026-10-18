@@ -13,7 +13,9 @@ describe('public configuration', () => {
   it.each(['http://localhost:54321', 'http://127.0.0.1:54321', 'http://[::1]:54321'])(
     'allows loopback %s',
     (url) => {
-      expect(parsePublicConfig({ ...SYNTHETIC_ENV, VITE_SUPABASE_URL: url }).supabaseUrl).toBe(url);
+      expect(
+        parsePublicConfig({ ...SYNTHETIC_ENV, VITE_SUPABASE_URL: url }, true).supabaseUrl,
+      ).toBe(url);
     },
   );
 

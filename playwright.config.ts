@@ -15,8 +15,13 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: '**/preview.spec.ts',
+      testIgnore: ['**/preview.spec.ts', '**/origin.spec.ts'],
       metadata: { buildDir: 'dist' },
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'chromium-origin-policy',
+      testMatch: '**/origin.spec.ts',
       use: { ...devices['Desktop Chrome'] },
     },
     ...['preview', 'unclassified'].map((kind, index) => ({

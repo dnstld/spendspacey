@@ -1,18 +1,20 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
-import { useAuth } from './context';
-import { isPagesPreview } from '@/lib/deployment';
+import { useContext } from 'react';
+import { AuthContext } from './context';
+import { authenticationAllowed } from '@/lib/deployment';
 
 export function GoogleSignInButton() {
   const { t } = useTranslation();
-  const { pending, signIn } = useAuth();
+  const auth = useContext(AuthContext);
+  const pending = auth?.pending;
   return (
     <Button
       className="w-full border-[#747775] bg-white font-google text-[#1f1f1f]"
       variant="outline"
-      disabled={isPagesPreview() || !!pending}
+      disabled={!auth || !authenticationAllowed() || !!pending}
       aria-busy={pending === 'signIn'}
-      onClick={() => void signIn()}
+      onClick={() => void auth?.signIn()}
     >
       <img src="/google-g.png" alt="" className="size-5 object-contain" />
       {pending === 'signIn' ? t(($) => $.auth.signingIn) : t(($) => $.auth.signIn)}

@@ -7,7 +7,7 @@ import { exchangeOnce, readCallback } from './callback';
 import { Feedback } from './Feedback';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import type { AuthMessage } from './errors';
-import { isPagesPreview } from '@/lib/deployment';
+import { authenticationAllowed } from '@/lib/deployment';
 
 export function AuthCallback() {
   const { client, message: operationMessage } = useAuth();
@@ -15,14 +15,14 @@ export function AuthCallback() {
   const navigate = useNavigate();
   const [input] = useState(() => readCallback(new URL(window.location.href)));
   const [message, setMessage] = useState<AuthMessage | null>(
-    isPagesPreview() ? 'previewAuthentication' : (input.message ?? null),
+    authenticationAllowed() ? (input.message ?? null) : 'previewAuthentication',
   );
 
   useEffect(() => {
     let active = true;
     // Capture input before cleanup; remounts reuse it and share the exchange promise.
     window.history.replaceState(window.history.state, '', '/auth/callback');
-    if (!isPagesPreview() && input.code) {
+    if (authenticationAllowed() && input.code) {
       void exchangeOnce(client, input.code).then((result) => {
         if (!active) return;
         if (result.ok) void navigate('/', { replace: true });

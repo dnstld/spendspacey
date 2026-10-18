@@ -1,3 +1,3 @@
 /// <reference types="vite/client" />
 
-declare const __PAGES_PREVIEW__: boolean;
+declare const __AUTH_POLICY__: import('./lib/deployment').AuthenticationPolicy;

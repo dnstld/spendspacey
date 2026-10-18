@@ -5,13 +5,24 @@ import { Shell } from './components/Shell';
 import { AuthProvider } from './auth/AuthProvider';
 import { AuthScreen } from './auth/AuthScreen';
 import { AuthCallback } from './auth/AuthCallback';
+import { useEffect } from 'react';
+import { authenticationAllowed, scrubUnavailableCallback } from './lib/deployment';
+import { GoogleSignInButton } from './auth/GoogleSignInButton';
 
 export default function App({ client }: { client?: SupabaseClient }) {
   const { t } = useTranslation();
-  if (!client) {
+  const allowed = authenticationAllowed();
+  useEffect(() => {
+    if (!client || !allowed) scrubUnavailableCallback();
+  }, [client, allowed]);
+  if (!client || !allowed) {
     return (
       <Shell>
-        <p role="alert">{t(($) => $.errors.configuration)}</p>
+        <h1 className="text-4xl font-semibold">Spendspacey</h1>
+        <GoogleSignInButton />
+        <p role="alert">
+          {allowed ? t(($) => $.errors.configuration) : t(($) => $.errors.previewAuthentication)}
+        </p>
       </Shell>
     );
   }

@@ -14,7 +14,7 @@ import { authMock } from '../../test/authMock';
 import { syntheticSession } from '../../test/session';
 
 async function setup(url = '/') {
-  vi.stubGlobal('__PAGES_PREVIEW__', true);
+  vi.stubGlobal('__AUTH_POLICY__', { kind: 'denied' });
   window.history.replaceState(null, '', url);
   const instance = await initializeI18n(createInstance(), 'en');
   const mock = authMock();
@@ -34,9 +34,9 @@ async function setup(url = '/') {
 it('keeps preview sign-in disabled and feedback localized without restoring an identity', async () => {
   const mock = await setup();
   expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
-  expect(screen.getByRole('alert')).toHaveTextContent('unavailable in this preview');
+  expect(screen.getByRole('alert')).toHaveTextContent('unavailable at this address');
   await userEvent.selectOptions(screen.getByRole('combobox'), 'pt-BR');
-  expect(screen.getByRole('alert')).toHaveTextContent('indisponível nesta prévia');
+  expect(screen.getByRole('alert')).toHaveTextContent('indisponível neste endereço');
   expect(screen.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
   expect(screen.queryByText('Test Person')).not.toBeInTheDocument();
   expect(mock.auth.getSession).not.toHaveBeenCalled();
@@ -46,23 +46,32 @@ it('keeps preview sign-in disabled and feedback localized without restoring an i
 
 it('scrubs preview callback input without exchanging or replaying a code', async () => {
   const mock = await setup('/auth/callback?code=synthetic-preview-code#synthetic-fragment');
-  expect(screen.getByRole('alert')).toHaveTextContent('unavailable in this preview');
+  expect(screen.getByRole('alert')).toHaveTextContent('unavailable at this address');
   expect(location.search + location.hash).toBe('');
   expect(await exchangeOnce(mock.client, 'synthetic-preview-code')).toEqual({
     ok: false,
     message: 'previewAuthentication',
   });
   expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole('link', { name: 'Back' }));
   expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
 });
 
-it('also blocks imperative sign-in calls that bypass the disabled control', async () => {
-  vi.stubGlobal('__PAGES_PREVIEW__', true);
+it('also blocks imperative authentication actions that bypass the disabled control', async () => {
+  vi.stubGlobal('__AUTH_POLICY__', { kind: 'denied' });
   const mock = authMock();
   function Probe() {
-    const { signIn, message } = useAuth();
-    return <button onClick={() => void signIn()}>{message ?? 'start'}</button>;
+    const { signIn, signOut, retry, message } = useAuth();
+    return (
+      <button
+        onClick={() => {
+          void signIn();
+          void signOut();
+          retry();
+        }}
+      >
+        {message ?? 'start'}
+      </button>
+    );
   }
   render(
     <AuthProvider client={mock.client}>
@@ -72,4 +81,6 @@ it('also blocks imperative sign-in calls that bypass the disabled control', asyn
   await userEvent.click(screen.getByRole('button'));
   expect(screen.getByRole('button')).toHaveTextContent('previewAuthentication');
   expect(mock.auth.signInWithOAuth).not.toHaveBeenCalled();
+  expect(mock.auth.signOut).not.toHaveBeenCalled();
+  expect(mock.auth.getSession).not.toHaveBeenCalled();
 });

@@ -66,10 +66,14 @@ try {
     cpSync(path, target, { dereference: false });
   }
   if (existsSync('dist')) cpSync('dist', join(staging, 'dist'), { recursive: true });
+  for (const kind of ['production', 'preview', 'unclassified']) {
+    const path = `.cache/deploy-auth-shell/${kind}`;
+    if (existsSync(path)) cpSync(path, join(staging, 'pages-builds', kind), { recursive: true });
+  }
   run(binary, ['dir', staging, '--redact', '--no-banner']);
   run(binary, ['git', '.', '--log-opts=--all', '--redact', '--no-banner']);
   console.log(
-    `Secret scan passed: ${inventory.length} repository candidate files, production build, and Git history.`,
+    `Secret scan passed: ${inventory.length} repository candidate files, local/Pages builds, and Git history.`,
   );
 } finally {
   rmSync(staging, { recursive: true, force: true });

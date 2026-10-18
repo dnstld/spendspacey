@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthContext, type AuthState } from './context';
 import { authMessage, requireAuthStorage, type AuthMessage } from './errors';
-import { isPagesPreview } from '@/lib/deployment';
+import { authenticationAllowed } from '@/lib/deployment';
 
 export function AuthProvider({
   client,
@@ -12,7 +12,7 @@ export function AuthProvider({
   children: ReactNode;
 }) {
   const [state, setState] = useState<AuthState>(() => ({
-    status: isPagesPreview() ? 'ready' : 'initializing',
+    status: authenticationAllowed() ? 'initializing' : 'ready',
     session: null,
   }));
   const [attempt, setAttempt] = useState(0);
@@ -21,7 +21,7 @@ export function AuthProvider({
   const operation = useRef(false);
 
   useEffect(() => {
-    if (isPagesPreview()) return;
+    if (!authenticationAllowed()) return;
     let active = true;
     let revision = 0;
     const {
@@ -57,13 +57,14 @@ export function AuthProvider({
   }, [client, attempt]);
 
   function retry() {
+    if (!authenticationAllowed()) return;
     setMessage(null);
     setState((previous) => ({ ...previous, status: 'initializing' }));
     setAttempt((previous) => previous + 1);
   }
 
   async function signIn() {
-    if (isPagesPreview()) {
+    if (!authenticationAllowed()) {
       setMessage('previewAuthentication');
       return;
     }
@@ -90,6 +91,10 @@ export function AuthProvider({
   }
 
   async function signOut() {
+    if (!authenticationAllowed()) {
+      setMessage('previewAuthentication');
+      return;
+    }
     if (operation.current) return;
     operation.current = true;
     setPending('signOut');

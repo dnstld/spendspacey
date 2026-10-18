@@ -21,7 +21,7 @@
     "spec:validate": "openspec validate --all --strict --no-interactive",
     "test:e2e": "node scripts/with-test-env.mjs exec playwright test",
     "secret:scan": "node scripts/secret-scan.mjs",
-    "build:test": "node scripts/with-test-env.mjs build"
+    "build:test": "node scripts/with-test-env.mjs build --mode development"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "1.3.1",

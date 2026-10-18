@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { authMessage, requireAuthStorage, type AuthMessage } from './errors';
-import { isPagesPreview } from '@/lib/deployment';
+import { authenticationAllowed } from '@/lib/deployment';
 
 type CallbackInput = { code: string; message?: never } | { message: AuthMessage; code?: never };
 type CallbackResult = { ok: true } | { ok: false; message: AuthMessage };
@@ -22,7 +22,8 @@ export function readCallback(url: URL): CallbackInput {
 }
 
 export function exchangeOnce(client: SupabaseClient, code: string): Promise<CallbackResult> {
-  if (isPagesPreview()) return Promise.resolve({ ok: false, message: 'previewAuthentication' });
+  if (!authenticationAllowed())
+    return Promise.resolve({ ok: false, message: 'previewAuthentication' });
   let clientExchanges = exchanges.get(client);
   if (!clientExchanges) {
     clientExchanges = new Map();

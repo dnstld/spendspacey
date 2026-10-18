@@ -58,11 +58,43 @@ Production deployment SHALL originate only from accepted changes merged into `ma
 - **WHEN** a non-production Pages build is opened
 - **THEN** Google sign-in and callback exchange are disabled with localized feedback, including when branch classification is unavailable
 - **AND** synthetic/static review remains possible without adding a Google origin or Supabase preview redirect
-- **AND** localhost development and the production current-origin callback continue to work
+- **AND** preview/unclassified artifacts remain denied even at the canonical production origin
+- **AND** localhost development uses a separate dev/test artifact while the production artifact denies every loopback rehost
+
+#### Scenario: Pages metadata establishes the canonical origin
+- **WHEN** any Pages build is compiled
+- **THEN** missing or invalid `CF_PAGES_URL` fails the build, including previews and missing-branch builds
+- **AND** the raw URL requires HTTPS/default port, no credentials/query/fragment/non-root path, and valid unambiguous `<project>.pages.dev` or `<deployment>.<project>.pages.dev` ASCII DNS labels
+- **AND** the canonical origin is derived as `https://<project>.pages.dev` from validated platform metadata, never arbitrary runtime host input
+- **AND** exactly two application configuration inputs remain: the Supabase URL and publishable key; no third public variable or full environment is exposed
+
+#### Scenario: Production bytes are served at different origins
+- **WHEN** the same compiled `main` production artifact is served at canonical, deployment-specific, unrelated, and loopback origins
+- **THEN** only the exact canonical origin may construct a Supabase Auth client, restore/refresh sessions, initiate OAuth, or exchange callback codes
+- **AND** denied origins construct no Auth client and send no Auth requests even with a saved expired session
+- **AND** restrictions are enforced before client construction and defensively at authentication actions, independently of provider allowlists
+- **AND** denied callback parameters/fragments are scrubbed even with invalid configuration and no client
+- **AND** allowed callbacks derive from the authorized active origin, with localized denied feedback elsewhere
 
 ### Requirement: Hosted response headers protect authentication delivery
 
 Entry HTML SHALL revalidate, hashed assets SHALL support immutable caching, and callback responses SHALL prohibit caching and referrer disclosure. Static security headers SHALL permit shell resources without requiring private browser credentials, arbitrary inline scripts, framing, or analytics. Header configuration SHALL preserve native SPA fallback.
+
+#### Scenario: Supabase URL is validated before headers are emitted
+- **WHEN** build configuration or CSP generation receives a Supabase URL
+- **THEN** raw validation before URL normalization accepts concrete ASCII/Punycode HTTPS DNS hosts including custom domains, normalizing omitted port and explicit `:443` to the same origin
+- **AND** it rejects wildcard/IP hosts, malformed/empty/overlong labels or hostnames, underscores, invalid hyphens, trailing dots, Unicode, nondefault remote ports, credentials, non-root paths, query/fragment delimiters, whitespace/control characters, backslashes, encoded ambiguity, and CSP-significant input
+- **AND** only the separate local rule permits explicitly approved HTTP loopbacks `localhost`, `127.0.0.1`, and `[::1]` on port `54321`
+- **AND** rejected inputs including `https://*` cannot build, emit headers, or broaden `connect-src`
+
+#### Scenario: Immutable rules follow the actual emitted inventory
+- **WHEN** the production build emits fingerprinted assets and generates `_headers`
+- **THEN** immutable rules name only existing fingerprinted emitted inventory files with verified bytes, never a broad `/assets/*` pattern or public-directory hash lookalikes
+- **AND** missing paths, including plausible hashed `/assets/` names, remain non-immutable with or without query parameters
+- **AND** Pages path matching ignores queries, so existing named fingerprinted assets with queries may remain immutable
+- **AND** `/`, entry HTML, and ordinary fallback HTML remain revalidated, while `/auth/callback` including queries remains no-store
+- **AND** all base/global/generated header rules count toward the 100-rule limit, every line is limited to 2,000 characters, and overflow fails the build
+- **AND** automated tests model query-independent matching and actual hosted confirmation remains pending under external delivery acceptance
 
 #### Scenario: Actual hosted headers are checked
 - **WHEN** HTML, callback paths including query-bearing requests, and hashed assets are requested from production
