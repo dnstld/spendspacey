@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthContext, type AuthState } from './context';
 import { authMessage, requireAuthStorage, type AuthMessage } from './errors';
+import { authenticationAllowed } from '@/lib/deployment';
+import { callbackRoute } from '@/lib/callbackRoute';
 
 export function AuthProvider({
   client,
@@ -10,13 +12,17 @@ export function AuthProvider({
   client: SupabaseClient;
   children: ReactNode;
 }) {
-  const [state, setState] = useState<AuthState>({ status: 'initializing', session: null });
+  const [state, setState] = useState<AuthState>(() => ({
+    status: authenticationAllowed() ? 'initializing' : 'ready',
+    session: null,
+  }));
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState<AuthMessage | null>(null);
   const [pending, setPending] = useState<'signIn' | 'signOut' | null>(null);
   const operation = useRef(false);
 
   useEffect(() => {
+    if (!authenticationAllowed()) return;
     let active = true;
     let revision = 0;
     const {
@@ -52,12 +58,17 @@ export function AuthProvider({
   }, [client, attempt]);
 
   function retry() {
+    if (!authenticationAllowed()) return;
     setMessage(null);
     setState((previous) => ({ ...previous, status: 'initializing' }));
     setAttempt((previous) => previous + 1);
   }
 
   async function signIn() {
+    if (!authenticationAllowed()) {
+      setMessage('previewAuthentication');
+      return;
+    }
     if (operation.current) return;
     operation.current = true;
     setPending('signIn');
@@ -67,7 +78,7 @@ export function AuthProvider({
       const { error } = await client.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${window.location.origin}${callbackRoute.path}`,
           scopes: 'openid email profile',
         },
       });
@@ -81,6 +92,10 @@ export function AuthProvider({
   }
 
   async function signOut() {
+    if (!authenticationAllowed()) {
+      setMessage('previewAuthentication');
+      return;
+    }
     if (operation.current) return;
     operation.current = true;
     setPending('signOut');

@@ -18,6 +18,7 @@ export const en = {
     unknownEmail: 'Email unavailable',
   },
   errors: {
+    previewAuthentication: 'Google sign-in is unavailable at this address.',
     configuration: 'Spendspacey could not start. Check the public application configuration.',
     restore: 'We could not restore your session. Please try again.',
     signIn: 'We could not start sign-in. Please try again.',

@@ -7,19 +7,23 @@ import { exchangeOnce, readCallback } from './callback';
 import { Feedback } from './Feedback';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import type { AuthMessage } from './errors';
+import { authenticationAllowed } from '@/lib/deployment';
+import { scrubCallbackUrl } from '@/lib/callbackRoute';
 
 export function AuthCallback() {
   const { client, message: operationMessage } = useAuth();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [input] = useState(() => readCallback(new URL(window.location.href)));
-  const [message, setMessage] = useState<AuthMessage | null>(input.message ?? null);
+  const [message, setMessage] = useState<AuthMessage | null>(
+    authenticationAllowed() ? (input.message ?? null) : 'previewAuthentication',
+  );
 
   useEffect(() => {
     let active = true;
     // Capture input before cleanup; remounts reuse it and share the exchange promise.
-    window.history.replaceState(window.history.state, '', '/auth/callback');
-    if (input.code) {
+    scrubCallbackUrl();
+    if (authenticationAllowed() && input.code) {
       void exchangeOnce(client, input.code).then((result) => {
         if (!active) return;
         if (result.ok) void navigate('/', { replace: true });

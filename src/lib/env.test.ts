@@ -13,7 +13,9 @@ describe('public configuration', () => {
   it.each(['http://localhost:54321', 'http://127.0.0.1:54321', 'http://[::1]:54321'])(
     'allows loopback %s',
     (url) => {
-      expect(parsePublicConfig({ ...SYNTHETIC_ENV, VITE_SUPABASE_URL: url }).supabaseUrl).toBe(url);
+      expect(
+        parsePublicConfig({ ...SYNTHETIC_ENV, VITE_SUPABASE_URL: url }, true).supabaseUrl,
+      ).toBe(url);
     },
   );
 
@@ -48,5 +50,11 @@ describe('public configuration', () => {
 
   it('reports missing variable names together', () => {
     expect(() => parsePublicConfig({})).toThrow('VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY');
+  });
+
+  it('rejects extra VITE inputs before they can be bundled without echoing their values', () => {
+    expect(() =>
+      parsePublicConfig({ ...SYNTHETIC_ENV, VITE_UNEXPECTED: 'synthetic-private-do-not-echo' }),
+    ).toThrow('Only VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are public inputs.');
   });
 });
