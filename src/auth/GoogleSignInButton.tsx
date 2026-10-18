@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { useAuth } from './context';
+import { isPagesPreview } from '@/lib/deployment';
 
 export function GoogleSignInButton() {
   const { t } = useTranslation();
@@ -9,7 +10,7 @@ export function GoogleSignInButton() {
     <Button
       className="w-full border-[#747775] bg-white font-google text-[#1f1f1f]"
       variant="outline"
-      disabled={!!pending}
+      disabled={isPagesPreview() || !!pending}
       aria-busy={pending === 'signIn'}
       onClick={() => void signIn()}
     >

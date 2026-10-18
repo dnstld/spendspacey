@@ -20,3 +20,22 @@ it('creates a single PKCE client with explicit callback ownership and persistent
     },
   });
 });
+
+it('does not persist or automatically refresh a preview session', async () => {
+  vi.resetModules();
+  vi.stubGlobal('__PAGES_PREVIEW__', true);
+  const { createClient } = await import('@supabase/supabase-js');
+  const { getSupabase } = await import('./supabase');
+  getSupabase({
+    supabaseUrl: 'https://auth.example.test',
+    supabasePublishableKey: 'sb_publishable_synthetic_phase1_only',
+  });
+  expect(createClient).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
+    auth: {
+      flowType: 'pkce',
+      detectSessionInUrl: false,
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+});

@@ -4,6 +4,10 @@ export interface PublicConfig {
 }
 
 export function parsePublicConfig(env: Record<string, unknown>): PublicConfig {
+  const allowed = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_PUBLISHABLE_KEY'];
+  if (Object.keys(env).some((key) => key.startsWith('VITE_') && !allowed.includes(key))) {
+    throw new Error('Only VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are public inputs.');
+  }
   const invalid: string[] = [];
   const rawUrl = env.VITE_SUPABASE_URL;
   const key = env.VITE_SUPABASE_PUBLISHABLE_KEY;

@@ -1,4 +1,4 @@
-name: Phase 1 checks
+name: Application checks
 
 on:
   pull_request:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Format, lint, types, unit, build, Chromium, secrets
+    name: Format, lint, types, unit, delivery, Chromium, secrets, specs
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -47,12 +47,16 @@ jobs:
         run: pnpm test:config
       - name: Production build with synthetic configuration
         run: pnpm build:test
+      - name: Synthetic Pages builds and delivery inventory
+        run: pnpm test:delivery
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Chromium browser tests
         run: pnpm test:e2e
       - name: Secret scan (inventory, build, history)
         run: pnpm secret:scan
+      - name: Strict OpenSpec validation
+        run: pnpm spec:validate
       - name: Synthetic browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

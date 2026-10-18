@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from './context';
 import { Feedback } from './Feedback';
 import { GoogleSignInButton } from './GoogleSignInButton';
+import { isPagesPreview } from '@/lib/deployment';
 
 function safeImage(value: unknown): string | undefined {
   if (typeof value !== 'string') return;
@@ -83,7 +84,7 @@ export function AuthScreen() {
           <GoogleSignInButton />
         </>
       )}
-      <Feedback message={message} />
+      <Feedback message={isPagesPreview() ? 'previewAuthentication' : message} />
     </>
   );
 }

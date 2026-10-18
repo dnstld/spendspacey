@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthContext, type AuthState } from './context';
 import { authMessage, requireAuthStorage, type AuthMessage } from './errors';
+import { isPagesPreview } from '@/lib/deployment';
 
 export function AuthProvider({
   client,
@@ -10,13 +11,17 @@ export function AuthProvider({
   client: SupabaseClient;
   children: ReactNode;
 }) {
-  const [state, setState] = useState<AuthState>({ status: 'initializing', session: null });
+  const [state, setState] = useState<AuthState>(() => ({
+    status: isPagesPreview() ? 'ready' : 'initializing',
+    session: null,
+  }));
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState<AuthMessage | null>(null);
   const [pending, setPending] = useState<'signIn' | 'signOut' | null>(null);
   const operation = useRef(false);
 
   useEffect(() => {
+    if (isPagesPreview()) return;
     let active = true;
     let revision = 0;
     const {
@@ -58,6 +63,10 @@ export function AuthProvider({
   }
 
   async function signIn() {
+    if (isPagesPreview()) {
+      setMessage('previewAuthentication');
+      return;
+    }
     if (operation.current) return;
     operation.current = true;
     setPending('signIn');
