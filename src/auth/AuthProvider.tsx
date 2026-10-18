@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthContext, type AuthState } from './context';
 import { authMessage, requireAuthStorage, type AuthMessage } from './errors';
 import { authenticationAllowed } from '@/lib/deployment';
+import { callbackRoute } from '@/lib/callbackRoute';
 
 export function AuthProvider({
   client,
@@ -77,7 +78,7 @@ export function AuthProvider({
       const { error } = await client.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${window.location.origin}${callbackRoute.path}`,
           scopes: 'openid email profile',
         },
       });

@@ -11,9 +11,3 @@ export function authenticationAllowed(
   }
   return false;
 }
-
-export function scrubUnavailableCallback() {
-  if (window.location.pathname === '/auth/callback') {
-    window.history.replaceState(window.history.state, '', '/auth/callback');
-  }
-}

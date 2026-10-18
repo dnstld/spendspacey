@@ -1,4 +1,23 @@
 import { test, expect } from './fixtures';
+import { callbackPaths } from '../test/callbackPaths';
+
+for (const path of callbackPaths) {
+  test(`authorized callback captures the code from ${path} and exchanges only once`, async ({
+    page,
+    auth,
+    baseURL,
+  }) => {
+    auth.returnPath = path;
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Sign in with Google' }).click();
+    await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
+    await expect(page).toHaveURL(`${baseURL}/`);
+    expect(auth.exchanges).toBe(1);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
+    expect(auth.exchanges).toBe(1);
+  });
+}
 
 for (const width of [360, 1280]) {
   test(`minimal shell is keyboard operable at ${width}px`, async ({ page }) => {

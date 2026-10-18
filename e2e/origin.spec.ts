@@ -4,6 +4,8 @@ import { test, expect, type BrowserContext } from '@playwright/test';
 import { SYNTHETIC_ENV } from '../test/config';
 import { syntheticSession } from '../test/session';
 import { pagesHeadersFor } from '../test/pagesHeaders';
+import { callbackRoute } from '../src/lib/callbackRoute';
+import { callbackInputs, callbackPaths, unrelatedPaths } from '../test/callbackPaths';
 
 const canonical = 'https://synthetic-app.pages.dev';
 const productionDir = '.cache/deploy-auth-shell/production';
@@ -114,6 +116,16 @@ for (const [kind, origin] of [
       (session) => {
         localStorage.setItem('sb-auth-auth-token', JSON.stringify(session));
         localStorage.setItem('sb-auth-auth-token-code-verifier', 'synthetic-verifier');
+        const state = {
+          idx: 0,
+          key: 'synthetic-entry',
+          usr: { sentinel: 'preserve current entry' },
+        };
+        history.replaceState(state, '');
+        sessionStorage.setItem(
+          'synthetic-history-before-bootstrap',
+          JSON.stringify({ state, length: history.length }),
+        );
       },
       { ...syntheticSession(), expires_at: 1 },
     );
@@ -123,8 +135,27 @@ for (const [kind, origin] of [
     await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
-    await page.goto(`${origin}/auth/callback?code=synthetic-code#error=synthetic-private`);
-    await expect(page).toHaveURL(`${origin}/auth/callback`);
+    for (const path of callbackPaths) {
+      for (const input of callbackInputs) {
+        // Start from another path so a fragment-only case is a fresh callback
+        // document launch, rather than a same-document hash navigation.
+        await page.goto(origin);
+        await page.goto(`${origin}${path}${input}`);
+        await expect(page).toHaveURL(`${origin}${callbackRoute.path}`);
+        await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+        const entry = await page.evaluate(() => ({
+          actual: { state: history.state, length: history.length },
+          before: JSON.parse(sessionStorage.getItem('synthetic-history-before-bootstrap')!),
+        }));
+        expect(entry.actual).toEqual(entry.before);
+      }
+    }
+    for (const path of unrelatedPaths) {
+      const url = `${origin}${path}?code=synthetic-unrelated#error=synthetic-unrelated`;
+      await page.goto(url);
+      await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+      expect(page.url()).toBe(url);
+    }
     await page.getByRole('combobox').selectOption('pt-BR');
     await expect(page.getByRole('alert')).toContainText('indisponível neste endereço');
     expect(calls.authRequests).toEqual([]);

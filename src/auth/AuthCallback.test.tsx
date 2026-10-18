@@ -9,9 +9,11 @@ import App from '@/App';
 import { initializeI18n } from '@/i18n';
 import { authMock, deferred } from '../../test/authMock';
 import { syntheticSession } from '../../test/session';
+import { callbackRoute } from '@/lib/callbackRoute';
+import { callbackPaths } from '../../test/callbackPaths';
 
 async function setup(url: string, mock = authMock()) {
-  window.history.replaceState(null, '', url);
+  window.history.replaceState({ sentinel: 'preserve callback entry' }, '', url);
   const instance = await initializeI18n(createInstance(), 'en');
   render(
     <StrictMode>
@@ -26,6 +28,37 @@ async function setup(url: string, mock = authMock()) {
 }
 
 describe('OAuth callback', () => {
+  it.each(callbackPaths)(
+    'captures the authorized code before canonicalizing %s without a second exchange',
+    async (path) => {
+      const mock = authMock();
+      const exchange = deferred<Awaited<ReturnType<typeof mock.auth.exchangeCodeForSession>>>();
+      mock.auth.exchangeCodeForSession.mockReturnValue(exchange.promise);
+      const length = history.length;
+      await setup(`${path}?code=synthetic-captured-code#synthetic-fragment`, mock);
+      expect(location.pathname + location.search + location.hash).toBe(callbackRoute.path);
+      expect(history.state).toEqual({ sentinel: 'preserve callback entry' });
+      expect(history.length).toBe(length);
+      expect(mock.auth.exchangeCodeForSession).toHaveBeenCalledExactlyOnceWith(
+        'synthetic-captured-code',
+      );
+      await act(async () => exchange.resolve({ data: { session: null }, error: null }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('unavailable or has expired');
+      expect(mock.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(callbackPaths)(
+    'captures a provider fragment before canonicalizing %s without exchange',
+    async (path) => {
+      const mock = await setup(`${path}?error_description=synthetic-private#error=access_denied`);
+      expect(await screen.findByRole('alert')).toHaveTextContent('cancelled');
+      expect(location.pathname + location.search + location.hash).toBe(callbackRoute.path);
+      expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
+      expect(document.body).not.toHaveTextContent('synthetic-private');
+    },
+  );
+
   it('exchanges only once under Strict Mode, without waiting for initial restoration', async () => {
     const mock = authMock();
     const read = deferred<Awaited<ReturnType<typeof mock.auth.getSession>>>();

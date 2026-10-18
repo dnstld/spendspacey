@@ -8,6 +8,7 @@ import { Feedback } from './Feedback';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import type { AuthMessage } from './errors';
 import { authenticationAllowed } from '@/lib/deployment';
+import { scrubCallbackUrl } from '@/lib/callbackRoute';
 
 export function AuthCallback() {
   const { client, message: operationMessage } = useAuth();
@@ -21,7 +22,7 @@ export function AuthCallback() {
   useEffect(() => {
     let active = true;
     // Capture input before cleanup; remounts reuse it and share the exchange promise.
-    window.history.replaceState(window.history.state, '', '/auth/callback');
+    scrubCallbackUrl();
     if (authenticationAllowed() && input.code) {
       void exchangeOnce(client, input.code).then((result) => {
         if (!active) return;

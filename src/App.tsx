@@ -6,14 +6,15 @@ import { AuthProvider } from './auth/AuthProvider';
 import { AuthScreen } from './auth/AuthScreen';
 import { AuthCallback } from './auth/AuthCallback';
 import { useEffect } from 'react';
-import { authenticationAllowed, scrubUnavailableCallback } from './lib/deployment';
+import { authenticationAllowed } from './lib/deployment';
+import { callbackRoute, scrubCallbackUrl } from './lib/callbackRoute';
 import { GoogleSignInButton } from './auth/GoogleSignInButton';
 
 export default function App({ client }: { client?: SupabaseClient }) {
   const { t } = useTranslation();
   const allowed = authenticationAllowed();
   useEffect(() => {
-    if (!client || !allowed) scrubUnavailableCallback();
+    if (!client || !allowed) scrubCallbackUrl();
   }, [client, allowed]);
   if (!client || !allowed) {
     return (
@@ -31,7 +32,7 @@ export default function App({ client }: { client?: SupabaseClient }) {
       <Shell>
         <Routes>
           <Route path="/" element={<AuthScreen />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route {...callbackRoute} element={<AuthCallback />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>

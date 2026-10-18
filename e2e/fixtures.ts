@@ -2,17 +2,24 @@ import { test as base, expect } from '@playwright/test';
 import { SYNTHETIC_ENV } from '../test/config';
 import { syntheticSession } from '../test/session';
 import { pagesHeadersFor } from '../test/pagesHeaders';
+import { callbackRoute } from '../src/lib/callbackRoute';
 
 interface AuthFixture {
   mode: 'success' | 'cancelled' | 'signup-disabled' | 'exchange-failure';
   exchanges: number;
   brokenAvatar: boolean;
+  returnPath: string;
 }
 
 export const test = base.extend<{ auth: AuthFixture }>({
   auth: [
     async ({ context, baseURL }, use, testInfo) => {
-      const auth: AuthFixture = { mode: 'success', exchanges: 0, brokenAvatar: false };
+      const auth: AuthFixture = {
+        mode: 'success',
+        exchanges: 0,
+        brokenAvatar: false,
+        returnPath: callbackRoute.path,
+      };
       const unexpected: string[] = [];
       const errors: string[] = [];
       context.on('page', (page) => {
@@ -43,7 +50,7 @@ export const test = base.extend<{ auth: AuthFixture }>({
         if (url.origin === SYNTHETIC_ENV.VITE_SUPABASE_URL) {
           if (url.pathname === '/auth/v1/authorize') {
             const callback = url.searchParams.get('redirect_to');
-            expect(callback).toBe(`${baseURL}/auth/callback`);
+            expect(callback).toBe(`${baseURL}${callbackRoute.path}`);
             expect(url.searchParams.get('provider')).toBe('google');
             expect(url.searchParams.get('code_challenge')).toBeTruthy();
             expect(url.searchParams.get('code_challenge_method')).toBe('s256');
@@ -53,7 +60,10 @@ export const test = base.extend<{ auth: AuthFixture }>({
                 : auth.mode === 'signup-disabled'
                   ? '#error=access_denied&error_code=signup_disabled'
                   : '?code=synthetic-code';
-            return route.fulfill({ status: 302, headers: { location: `${callback}${suffix}` } });
+            return route.fulfill({
+              status: 302,
+              headers: { location: `${baseURL}${auth.returnPath}${suffix}` },
+            });
           }
           if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'pkce') {
             auth.exchanges++;

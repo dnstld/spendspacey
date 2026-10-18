@@ -24,5 +24,7 @@ Reviewer corrections replace the original preview boolean and broad `/assets/*` 
 
 ## Workflow follow-up
 
+The agreed callback-cleanup correction uses shared route metadata and React Router matching for every recognized variant. Local evidence covers immediate denied/invalid-config cleanup, authorized capture before mounted canonicalization, preserved history state/length, unchanged unrelated URLs, and no extra exchange or denied SDK/Auth activity. This corrects the existing task 1.2 behavior; no task checkbox advances. PM external configuration remains paused pending reviewer approval of the implementation.
+
 - Review and accept the published increment, then synchronize its durable specs through the appropriate sync/archive workflow.
 - Only after publication, phone acceptance, integration, and spec synchronization begin `installable-offline-shell`, followed by `online-profiles` and `offline-profiles`.

@@ -76,6 +76,13 @@ Production deployment SHALL originate only from accepted changes merged into `ma
 - **AND** denied callback parameters/fragments are scrubbed even with invalid configuration and no client
 - **AND** allowed callbacks derive from the authorized active origin, with localized denied feedback elsewhere
 
+#### Scenario: Router-recognized callback variants are scrubbed safely
+- **WHEN** a callback path is recognized by React Router from the shared canonical path and matching options, including case, trailing/multiple-slash, and encoded variants
+- **THEN** denied/no-client bootstrap immediately replaces it with `/auth/callback`, removing query and fragment without constructing an Auth client or issuing authentication requests
+- **AND** authorized bootstrap preserves input until the mounted callback captures it, then the same cleanup canonicalizes the URL without an additional token exchange
+- **AND** `history.replaceState` preserves current history state and length, while unrelated and near-match URLs remain exactly unchanged
+- **AND** application routing and early recognition consume the same UI/Auth-independent route definition through React Router's matching API, without duplicate matching rules
+
 ### Requirement: Hosted response headers protect authentication delivery
 
 Entry HTML SHALL revalidate, hashed assets SHALL support immutable caching, and callback responses SHALL prohibit caching and referrer disclosure. Static security headers SHALL permit shell resources without requiring private browser credentials, arbitrary inline scripts, framing, or analytics. Header configuration SHALL preserve native SPA fallback.

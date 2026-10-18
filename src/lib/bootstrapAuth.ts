@@ -1,5 +1,6 @@
 import { parsePublicConfig } from './env';
-import { authenticationAllowed, scrubUnavailableCallback } from './deployment';
+import { authenticationAllowed } from './deployment';
+import { scrubCallbackUrl } from './callbackRoute';
 
 export async function bootstrapAuth(env: Record<string, unknown>) {
   try {
@@ -10,5 +11,5 @@ export async function bootstrapAuth(env: Record<string, unknown>) {
   } catch {
     // Neither invalid configuration nor denied origins may initialize Auth.
   }
-  scrubUnavailableCallback();
+  scrubCallbackUrl();
 }

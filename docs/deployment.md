@@ -88,6 +88,8 @@ Verify this behavior on an actual preview when one exists. Do not register previ
 
 ## Automated verification
 
+Callback recognition uses the same canonical route definition and matching options as application routing, via React Router's `matchRoutes`. This includes case, trailing/multiple-slash, and encoded equivalents. On denied/no-client exits, bootstrap immediately replaces recognized callback URLs with `/auth/callback`, removing query and fragment. Authorized bootstrap leaves input for mounted capture before the same cleanup runs. Cleanup preserves current history state and length through `replaceState`, makes no additional token exchange, and leaves unrelated/near-match URLs unchanged. Keep registered redirects canonical; recognizing variants requires no additional provider URLs or settings.
+
 Use Node 24.21.0/pnpm 10.27.0:
 
 ```sh

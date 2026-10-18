@@ -6,6 +6,27 @@ import { I18nextProvider } from 'react-i18next';
 import { initializeI18n } from './i18n';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
+import { callbackRoute } from './lib/callbackRoute';
+import { callbackPaths } from '../test/callbackPaths';
+
+it.each(callbackPaths)(
+  'scrubs callback %s when the fallback screen mounts without a client',
+  async (path) => {
+    const state = { sentinel: 'preserve fallback entry' };
+    history.replaceState(state, '', `${path}?code=synthetic-code#error=synthetic-error`);
+    const length = history.length;
+    const instance = await initializeI18n(createInstance(), 'en');
+    render(
+      <I18nextProvider i18n={instance}>
+        <App />
+      </I18nextProvider>,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('public application configuration');
+    expect(location.pathname + location.search + location.hash).toBe(callbackRoute.path);
+    expect(history.state).toEqual(state);
+    expect(history.length).toBe(length);
+  },
+);
 
 it('shows safe localized configuration feedback without initializing authentication', async () => {
   const instance = await initializeI18n(createInstance(), 'en');
