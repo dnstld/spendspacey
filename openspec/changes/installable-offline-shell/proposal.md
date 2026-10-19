@@ -6,7 +6,7 @@ After the existing auth shell is published, the PM should be able to install it 
 
 ## What Changes
 
-- Sequence **2 of 4**; requires [deploy-auth-shell](../deploy-auth-shell/proposal.md) implemented, accepted on the phone, and its durable specs synchronized before apply.
+- Sequence **2 of 4**; requires [deploy-auth-shell](../archive/2026-10-19-deploy-auth-shell/proposal.md) implemented, accepted on the phone, and its durable specs synchronized before apply.
 - Add stable manifest identity, ordinary/maskable/Apple icons, matching colors, standalone display, and mobile metadata.
 - Precache only reviewed static build assets, including all required chunks, the local font/button image, and both bundled languages; register the worker only in production.
 - Keep Supabase/API/OAuth/avatar responses, authentication parameters, and user information out of service-worker caches. A controlled callback can receive generic static shell bytes without caching its URL or response.
