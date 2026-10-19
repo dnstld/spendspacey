@@ -49,9 +49,13 @@ jobs:
         run: pnpm build:test
       - name: Production, preview, unclassified Pages artifacts and exact header inventory
         run: pnpm test:delivery
+      - name: Manifest, icons and exact static precache integrity
+        run: pnpm test:pwa
+      - name: Prepare two complete synthetic PWA versions
+        run: pnpm test:pwa:versions
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
-      - name: Chromium authentication and same-artifact origin enforcement
+      - name: Chromium authentication, origin enforcement, offline caches and updates
         run: pnpm test:e2e
       - name: Secret scan (inventory, build, history)
         run: pnpm secret:scan

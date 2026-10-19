@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { parsePublicConfig } from './src/lib/env.ts';
 import { pagesHeaders, pagesPolicy, verifyPagesToolchain } from './build/pages.ts';
+import { pwaPlugins } from './build/pwa.ts';
 
 export default defineConfig(({ mode, command, isPreview }) => {
   verifyPagesToolchain(process.env);
@@ -14,7 +15,7 @@ export default defineConfig(({ mode, command, isPreview }) => {
   const local = policy.kind === 'local';
   const config = parsePublicConfig(loadEnv(mode, process.cwd(), 'VITE_'), local);
   return {
-    plugins: [react(), tailwindcss(), pagesHeaders(config.supabaseUrl, local)],
+    plugins: [react(), tailwindcss(), pagesHeaders(config.supabaseUrl, local), ...pwaPlugins()],
     // Only validated generated policy crosses this boundary; no third VITE input.
     define: { __AUTH_POLICY__: JSON.stringify(policy) },
     build: {

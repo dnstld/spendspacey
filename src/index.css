@@ -35,3 +35,16 @@
     cursor: pointer;
   }
 }
+
+.app-safe-area {
+  padding-top: max(2rem, env(safe-area-inset-top));
+  padding-bottom: max(2rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+@media (display-mode: standalone) {
+  .app-safe-area {
+    min-height: 100svh;
+  }
+}

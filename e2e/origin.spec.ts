@@ -14,7 +14,7 @@ function inventory(dir: string) {
   return new Map(
     readdirSync(dir, { recursive: true })
       .map(String)
-      .filter((path) => /\.(html|js|css|png|woff2)$/.test(path))
+      .filter((path) => /\.(html|js|css|png|woff2|webmanifest)$/.test(path))
       .map((path) => [path, readFileSync(resolve(dir, path))]),
   );
 }
@@ -25,6 +25,7 @@ const mime: Record<string, string> = {
   css: 'text/css',
   png: 'image/png',
   woff2: 'font/woff2',
+  webmanifest: 'application/manifest+json',
 };
 
 async function serveArtifact(context: BrowserContext, origin: string, kind = 'production') {
@@ -39,7 +40,10 @@ async function serveArtifact(context: BrowserContext, origin: string, kind = 'pr
     if (url.origin === origin) {
       const path = url.pathname.slice(1);
       const file = files.has(path) ? path : 'index.html'; // native SPA fallback contract
-      if (/^assets\/supabase-/.test(path)) sdkRequests.push(path);
+      // The worker precaches every required static chunk, including the SDK.
+      // Only a page import would execute the module that can construct Auth.
+      if (/^assets\/supabase-/.test(path) && !route.request().serviceWorker())
+        sdkRequests.push(path);
       return route.fulfill({
         body: files.get(file),
         headers: {
@@ -159,7 +163,7 @@ for (const [kind, origin] of [
     await page.getByRole('combobox').selectOption('pt-BR');
     await expect(page.getByRole('alert')).toContainText('indisponível neste endereço');
     expect(calls.authRequests).toEqual([]);
-    // All SDK construction lives in this lazy module; denied launches never load it.
+    // All SDK construction lives in this lazy module; denied pages never import it.
     // Unit tests also spy on createClient directly, including invalid configuration.
     expect(calls.sdkRequests).toEqual([]);
     expect(calls.exchanges()).toBe(0);

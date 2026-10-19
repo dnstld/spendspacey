@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { SYNTHETIC_ENV } from '../test/config.ts';
 import { pagesHeadersFor } from '../test/pagesHeaders.ts';
+import { checkPwa } from './check-pwa.mjs';
 import { validateHeaderLimits } from '../build/pages.ts';
 
 // Compile real Pages variants. Browser tests subsequently exercise these exact files.
@@ -49,8 +50,18 @@ for (const [label, branch, outDir] of [
       ),
       `Unexpected published path: ${path}`,
     );
-    assert(!/manifest|service-worker|(^|\/)sw\.js$/.test(path), 'PWA work is deferred');
   }
+  checkPwa(outDir);
+  for (const path of ['/sw.js', '/manifest.webmanifest']) {
+    assert.equal(pagesHeadersFor(outDir, path)['cache-control'], 'no-cache');
+    assert.equal(pagesHeadersFor(outDir, path + '?v=synthetic')['cache-control'], 'no-cache');
+  }
+  assert.equal(pagesHeadersFor(outDir, '/sw.js')['content-type'], 'application/javascript');
+  assert.equal(pagesHeadersFor(outDir, '/sw.js')['service-worker-allowed'], '/');
+  assert.equal(
+    pagesHeadersFor(outDir, '/manifest.webmanifest')['content-type'],
+    'application/manifest+json',
+  );
   const headers = readFileSync(resolve(outDir, '_headers'), 'utf8');
   validateHeaderLimits(headers);
   assert(!headers.includes('/assets/*'));

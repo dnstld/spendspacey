@@ -35,24 +35,42 @@ export function AuthProvider({
       setMessage(null);
     });
     const readRevision = revision;
+    let settled = false;
+    const unavailable = () => {
+      if (!active || settled || revision !== readRevision) return;
+      setState((previous) =>
+        previous.status === 'initializing' ? { ...previous, status: 'error' } : previous,
+      );
+      setMessage('offlineRestore');
+    };
+    const timer = window.setTimeout(unavailable, 8000);
+    window.addEventListener('offline', unavailable);
+    if (navigator.onLine === false) unavailable();
     void client.auth
       .getSession()
       .then(({ data, error }) => {
         if (!active || revision !== readRevision) return;
+        settled = true;
+        clearTimeout(timer);
         if (error) {
           setState((previous) => ({ ...previous, status: 'error' }));
-          setMessage(authMessage(error, 'restore'));
+          setMessage(navigator.onLine === false ? 'offlineRestore' : authMessage(error, 'restore'));
         } else {
           setState({ status: 'ready', session: data.session });
+          setMessage(null);
         }
       })
       .catch(() => {
         if (!active || revision !== readRevision) return;
+        settled = true;
         setState((previous) => ({ ...previous, status: 'error' }));
-        setMessage('restore');
+        clearTimeout(timer);
+        setMessage(navigator.onLine === false ? 'offlineRestore' : 'restore');
       });
     return () => {
       active = false;
+      clearTimeout(timer);
+      window.removeEventListener('offline', unavailable);
       subscription.unsubscribe();
     };
   }, [client, attempt]);
@@ -64,12 +82,16 @@ export function AuthProvider({
     setAttempt((previous) => previous + 1);
   }
 
-  async function signIn() {
+  async function signIn(tryConnection = false) {
     if (!authenticationAllowed()) {
       setMessage('previewAuthentication');
       return;
     }
     if (operation.current) return;
+    if (navigator.onLine === false && !tryConnection) {
+      setMessage('offlineSignIn');
+      return;
+    }
     operation.current = true;
     setPending('signIn');
     setMessage(null);
@@ -91,12 +113,16 @@ export function AuthProvider({
     }
   }
 
-  async function signOut() {
+  async function signOut(tryConnection = false) {
     if (!authenticationAllowed()) {
       setMessage('previewAuthentication');
       return;
     }
     if (operation.current) return;
+    if (navigator.onLine === false && !tryConnection) {
+      setMessage('offlineSignOut');
+      return;
+    }
     operation.current = true;
     setPending('signOut');
     setMessage(null);
