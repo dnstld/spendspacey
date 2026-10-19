@@ -6,7 +6,7 @@ Spendspacey's localized authentication shell only runs locally. Publish that pro
 
 ## What Changes
 
-- Sequence **1 of 4**, after completed Phase 1. Replaces the deployment portion of [the superseded combined plan](../ship-installable-offline-profiles/proposal.md).
+- Sequence **1 of 4**, after completed Phase 1. Replaces the deployment portion of [the superseded combined plan](../../ship-installable-offline-profiles/proposal.md).
 - Use Cloudflare Pages Free with GitHub repository integration, production branch `main`, repository root, React/Vite static output `dist`, and the existing pnpm build script. Pin Node `24.21.0` and pnpm `10.27.0` through supported Pages configuration.
 - Start with the assigned production `https://<project>.pages.dev` origin. Preserve native Pages SPA fallback for direct `/auth/callback`; add appropriate static response headers.
 - Supply only `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as application build variables. Toolchain selectors are separate nonsecret platform configuration; no private credentials belong in Cloudflare.
@@ -33,4 +33,4 @@ None. Existing `user-auth` and `localization` behavior remains applicable at aut
 
 Work touches Pages project settings, static header generation, a canonical-origin authentication policy, raw URL validation, deployment documentation, and focused synthetic/hosted verification. Reuse the frozen lockfile, existing Linux CI, and exactly two public Supabase inputs; platform-supplied origin metadata is not a third application variable. Add no application dependency or database operation. Reviewer corrections supersede the initial preview-boolean guard and broad immutable asset rule; native SPA fallback remains unchanged.
 
-Completion unblocks [installable-offline-shell](../installable-offline-shell/proposal.md), followed by [online-profiles](../online-profiles/proposal.md) and [offline-profiles](../offline-profiles/proposal.md). The latter two display only the current user's read-only profile. Cloudflare/GitHub access and the assigned `pages.dev` hostname remain execution prerequisites, not unresolved product decisions. Home Screen installation is introduced and manually accepted in change 2.
+Completion unblocks [installable-offline-shell](../../installable-offline-shell/proposal.md), followed by [online-profiles](../../online-profiles/proposal.md) and [offline-profiles](../../offline-profiles/proposal.md). The latter two display only the current user's read-only profile. Cloudflare/GitHub access and the assigned `pages.dev` hostname remain execution prerequisites, not unresolved product decisions. Home Screen installation is introduced and manually accepted in change 2.
