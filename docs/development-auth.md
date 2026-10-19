@@ -1,6 +1,6 @@
 # Development authentication and PM acceptance
 
-OpenSpec change: `bootstrap-localized-auth-shell`. **The PM accepted tasks 6.2 and 6.3; Phase 1 is archived.** See the [sanitized historical acceptance](../openspec/changes/archive/2026-10-17-bootstrap-localized-auth-shell/tasks.md). The initial-enrollment steps below are historical setup instructions, not permission to reopen signups. Keep new-user signups disabled for existing-identity development and all production configuration/smoke work. Automated development does not create, configure, or modify Google or Supabase projects. Production has a separate [Pages runbook](deployment.md) and pending acceptance.
+OpenSpec change: `bootstrap-localized-auth-shell`. **The PM accepted tasks 6.2 and 6.3; Phase 1 is archived.** See the [sanitized historical acceptance](../openspec/changes/archive/2026-10-17-bootstrap-localized-auth-shell/tasks.md). The initial-enrollment steps below are historical setup instructions, not permission to reopen signups. Keep new-user signups disabled for existing-identity development and all production configuration/smoke work. Automated development does not create, configure, or modify Google or Supabase projects. Production has a separate [Pages runbook](deployment.md) and [deployment acceptance record](deploy-auth-shell-acceptance.md).
 
 ## Development configuration (PM-owned)
 

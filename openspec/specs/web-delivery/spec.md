@@ -1,10 +1,10 @@
-# Spec Delta
+# web-delivery Specification
 
 ## Purpose
 
 Deliver the existing localized authentication shell through Cloudflare Pages Free at a stable production origin and verify online phone authentication before installation or profile features.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Stable HTTPS application delivery
 
@@ -101,7 +101,7 @@ Entry HTML SHALL revalidate, hashed assets SHALL support immutable caching, and 
 - **AND** Pages path matching ignores queries, so existing named fingerprinted assets with queries may remain immutable
 - **AND** `/`, entry HTML, and ordinary fallback HTML remain revalidated, while `/auth/callback` including queries remains no-store
 - **AND** all base/global/generated header rules count toward the 100-rule limit, every line is limited to 2,000 characters, and overflow fails the build
-- **AND** automated tests model query-independent matching and actual hosted confirmation remains pending under external delivery acceptance
+- **AND** automated tests model query-independent matching and do not replace separately recorded actual hosted confirmation
 
 #### Scenario: Actual hosted headers are checked
 - **WHEN** HTML, callback paths including query-bearing requests, and hashed assets are requested from production
