@@ -792,14 +792,12 @@ describe('extended interruption and concurrency matrix', () => {
             throw Error('termination boundary');
           }
         };
-        const count = f.fetches.length;
         const request = crypto.randomUUID();
         await g.repair(request, 'recovery-1', binding);
         f.hook = undefined;
         const restart = await f.engine('v1');
         await restart.initialize();
         const status = await restart.status('recovery-1');
-        const s = await restart.snapshot();
         if (status.repair === 'complete')
           expect(await (await root(restart, 'new')).text()).toBe('v1:/');
         else {
@@ -808,10 +806,22 @@ describe('extended interruption and concurrency matrix', () => {
           await restart.status('recovery-1');
           expect(f.fetches.length).toBe(after);
         }
-        if (s.chain.some((r) => r.body.kind === 'attempt')) {
+        const beforeReplay = await restart.snapshot();
+        if (beforeReplay.chain.some((r) => r.body.kind === 'attempt')) {
+          const requestsBeforeReplay = f.fetches.length;
           await restart.repair(request, 'recovery-1', binding);
-          expect(f.fetches.length).toBeGreaterThanOrEqual(count);
-          expect(s.chain.filter((r) => r.body.kind === 'attempt')).toHaveLength(1);
+          expect(f.fetches.length).toBe(requestsBeforeReplay);
+          const afterReplay = await restart.snapshot();
+          expect(afterReplay.chain).toEqual(beforeReplay.chain);
+          const attempts = afterReplay.chain.filter((r) => r.body.kind === 'attempt');
+          expect(attempts).toHaveLength(1);
+          expect(attempts[0].body).toMatchObject({ kind: 'attempt', request });
+          const finish = afterReplay.chain.find(
+            (r) => r.body.kind === 'finish' && r.body.attempt === attempts[0].id,
+          );
+          if (boundary === 'finish' && timing === 'afterPut')
+            expect(finish?.body).toMatchObject({ kind: 'finish', outcome: 'complete' });
+          else expect(finish).toBeUndefined();
         }
       }
     },
