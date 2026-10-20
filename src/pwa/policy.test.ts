@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { routeRequest, validStaticResponse } from '../../worker/policy';
 const origin = 'https://app.example.test';
-const approved = new Set([`${origin}/index.html`, `${origin}/assets/index-abcdefgh.js`]);
+const approved = new Set([`${origin}/`, `${origin}/assets/index-abcdefgh.js`]);
 function request(path: string, init?: RequestInit, navigation = false) {
   const result = new Request(new URL(path, origin), init);
   if (navigation) Object.defineProperty(result, 'mode', { value: 'navigate' });
@@ -10,7 +10,7 @@ function request(path: string, init?: RequestInit, navigation = false) {
 describe('static worker request boundary', () => {
   it.each([
     ['/assets/index-abcdefgh.js', false, 'static'],
-    ['/index.html', false, 'static'],
+    ['/index.html', false, 'network'],
     ['/', true, 'shell'],
     ['/auth/callback?code=private#token=private', true, 'callback'],
     ['/auth/callback', false, 'network'],

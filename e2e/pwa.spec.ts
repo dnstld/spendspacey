@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test, expect, type Page, type BrowserContext, type CDPSession } from '@playwright/test';
 import { pwaServer } from './pwa-server';
 import { syntheticSession } from '../test/session';
@@ -37,8 +38,13 @@ async function setOffline(context: BrowserContext, offline: boolean) {
 async function prepared(page: Page, origin: string) {
   await disableHttpCache(page);
   await page.goto(origin);
+  await expect(page.getByTestId('offline-readiness')).toContainText('Prepared for offline', {
+    timeout: 20000,
+  });
+  expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(false);
+  await page.reload();
   await expect(page.getByTestId('offline-readiness')).toContainText('ready for offline', {
-    timeout: 20_000,
+    timeout: 20000,
   });
   expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
 }
@@ -221,12 +227,12 @@ test('Auth, OAuth, token, API, avatars and arbitrary static queries bypass every
     const after = await inventory(page);
     expect(after.map(({ url }) => url).sort()).toEqual(before.map(({ url }) => url).sort());
     for (const item of after) {
-      expect(item.name).toMatch(/^spendspacey-static-v1$/);
+      expect(item.name).toMatch(/^spendspacey-static-(resource|meta)-v2/);
       expect(new URL(item.url).origin).toBe(host.origin);
-      expect(item.url).not.toMatch(/callback|token|oauth|\/api\/|\/auth\/|profiles|private|avatar/);
-      expect(
-        [...new URL(item.url).searchParams.keys()].every((key) => key === '__WB_REVISION__'),
-      ).toBe(true);
+      expect(item.url).not.toMatch(
+        /callback|token|oauth|\/api\/|\/auth\/|profiles|private|avatar|index\.html/,
+      );
+      expect(new URL(item.url).search).toBe('');
       expect(item.body).not.toMatch(
         /synthetic-private-marker|person@example.test|Test Person|synthetic-code/,
       );
@@ -277,166 +283,415 @@ test('expired SDK session offline never blocks language controls or invents sign
   }
 });
 
-test('complete replacement waits for all clients, cleans only owned assets, and launches offline', async ({
-  page,
-  context,
-}) => {
-  const host = await pwaServer();
-  host.state.directory = '.cache/installable-offline-shell/v1';
-  try {
-    await prepared(page, host.origin);
-    const old = (await inventory(page)).map(({ url }) => url);
-    await context.route('https://images.example.test/**', (route) =>
-      route.fulfill({ status: 404 }),
-    );
-    await page.evaluate(
-      (session) => localStorage.setItem('sb-auth-auth-token', JSON.stringify(session)),
-      syntheticSession(),
-    );
-    await page.evaluate(async () => {
-      localStorage.setItem('spendspacey.locale', 'pt-BR');
-      localStorage.setItem('sdk-storage-sentinel', 'preserve');
-      await (await caches.open('unrelated-cache')).put('/unrelated', new Response('preserve'));
-      await (await caches.open('spendspacey-static-v0')).put('/old', new Response('obsolete'));
-    });
-    const second = await context.newPage();
-    await second.goto(host.origin);
-    host.state.directory = '.cache/installable-offline-shell/v2';
-    await page.evaluate(async () => (await navigator.serviceWorker.getRegistration())!.update());
-    await expect(page.getByText('An update is ready.', { exact: false })).toBeVisible({
-      timeout: 20_000,
-    });
-    expect(await page.locator('html').getAttribute('data-synthetic-version')).toBe('v1');
-    await page.close();
-    expect(
-      await second.evaluate(
-        async () => !!(await navigator.serviceWorker.getRegistration())!.waiting,
-      ),
-    ).toBe(true);
-    await second.close();
-    const replacement = await context.newPage();
-    await disableHttpCache(replacement);
-    await replacement.goto(host.origin);
-    await expect(replacement.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
-    await expect(replacement.getByTestId('offline-readiness')).toContainText(
-      'pronta para uso offline',
-    );
-    await expect(replacement.getByRole('heading', { name: 'Test Person' })).toBeVisible();
-    expect(
-      await replacement.evaluate(() => localStorage.getItem('sb-auth-auth-token')),
-    ).toBeTruthy();
-    expect(await replacement.evaluate(() => localStorage.getItem('sdk-storage-sentinel'))).toBe(
-      'preserve',
-    );
-    const keys = await replacement.evaluate(() => caches.keys());
-    expect(keys).toContain('unrelated-cache');
-    expect(keys).not.toContain('spendspacey-static-v0');
-    const current = await inventory(replacement);
-    for (const url of old.filter((url) => /assets\/index-.*\.js|index\.html/.test(url)))
-      expect(current.some((item) => item.url === url)).toBe(false);
-    await setOffline(context, true);
-    await replacement.reload();
-    await expect(replacement.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
-  } finally {
-    await setOffline(context, false);
-    await host.close();
-  }
-});
-
-test('failed replacement with fallback HTML retains the complete old offline shell', async ({
-  page,
-  context,
-}) => {
-  const host = await pwaServer();
-  host.state.directory = '.cache/installable-offline-shell/v1';
-  try {
-    await prepared(page, host.origin);
-    host.state.directory = '.cache/installable-offline-shell/v2';
-    host.state.broken = true;
-    await page.evaluate(async () => {
-      const reg = (await navigator.serviceWorker.getRegistration())!;
-      await reg.update();
-      await new Promise<void>((resolve) => {
-        const worker = reg.installing;
-        if (!worker) return resolve();
-        worker.addEventListener('statechange', () => {
-          if (worker.state === 'redundant') resolve();
-        });
+async function records(page: Page) {
+  return page.evaluate(async () => {
+    const cache = await caches.open('spendspacey-static-meta-v2');
+    return (await Promise.all(
+      (await cache.keys()).map(async (request) => await (await cache.match(request))!.json()),
+    )) as { id: string; body: Record<string, unknown> }[];
+  });
+}
+async function selection(page: Page) {
+  const rows = await records(page);
+  const commits = rows.filter((row) => row.body.kind === 'select');
+  const parents = new Set(commits.map((row) => row.body.parent));
+  const head = commits.filter((row) => !parents.has(row.id));
+  expect(head).toHaveLength(1);
+  const complete = rows.find((row) => row.id === head[0].body.selected)!;
+  const reservation = rows.find((row) => row.id === complete.body.reservation)!;
+  return {
+    head: head[0],
+    complete,
+    cache: 'spendspacey-static-resource-v2-' + String(reservation.body.instance),
+  };
+}
+async function message(page: Page, type: string, details: Record<string, unknown> = {}) {
+  return page.evaluate(
+    async ({ type, details }) => {
+      const worker =
+        navigator.serviceWorker.controller ??
+        (await navigator.serviceWorker.getRegistration())!.active!;
+      return await new Promise<Record<string, unknown>>((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (event) => {
+          channel.port1.close();
+          resolve(event.data);
+        };
+        worker.postMessage({ type, ...details }, [channel.port2]);
       });
+    },
+    { type, details },
+  );
+}
+async function waitReplacement(
+  page: Page,
+  directory: string,
+  host: Awaited<ReturnType<typeof pwaServer>>,
+) {
+  host.state.directory = directory;
+  await page.evaluate(async () => (await navigator.serviceWorker.getRegistration())!.update());
+  const expectedScript = readFileSync(directory + '/index.html', 'utf8').match(
+    /src="([^"]+\.js)"/,
+  )![1];
+  await expect
+    .poll(
+      async () =>
+        await page.evaluate(async (expectedScript) => {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg?.waiting?.state !== 'installed' || reg.installing) return false;
+          const meta = await caches.open('spendspacey-static-meta-v2');
+          const rows = await Promise.all(
+            (await meta.keys()).map(async (request) => await (await meta.match(request))!.json()),
+          );
+          const selected = new Set(
+            rows.filter((row) => row.body.kind === 'select').map((row) => row.body.selected),
+          );
+          const candidate = rows.find(
+            (row) =>
+              row.body.kind === 'complete' &&
+              !selected.has(row.id) &&
+              row.body.descriptor.entries.some(
+                (entry: { url: string }) => entry.url === expectedScript,
+              ),
+          );
+          if (!candidate) return false;
+          const result = await new Promise<{ worker: string; prepared: boolean }>((resolve) => {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = (event) => {
+              channel.port1.close();
+              resolve(event.data);
+            };
+            reg.waiting!.postMessage({ type: 'STATUS' }, [channel.port2]);
+          });
+          return (
+            result.prepared &&
+            rows.find((row) => row.id === candidate.body.reservation).body.worker === result.worker
+          );
+        }, expectedScript),
+      { timeout: 20000 },
+    )
+    .toBe(true);
+}
+async function damageWaiting(page: Page, corruption: string) {
+  await page.evaluate(async (corruption) => {
+    const meta = await caches.open('spendspacey-static-meta-v2');
+    const rows = await Promise.all(
+      (await meta.keys()).map(async (request) => await (await meta.match(request))!.json()),
+    );
+    const used = new Set(
+      rows.filter((row) => row.body.kind === 'select').map((row) => row.body.selected),
+    );
+    const completions = rows.filter((row) => row.body.kind === 'complete' && !used.has(row.id));
+    if (completions.length !== 1)
+      throw new Error(
+        'Expected one unselected completion: ' +
+          JSON.stringify({
+            used: [...used],
+            rows: rows
+              .filter((row) => row.body.kind === 'complete' || row.body.kind === 'select')
+              .map((row) => ({
+                id: row.id,
+                body:
+                  row.body.kind === 'select'
+                    ? row.body
+                    : {
+                        kind: 'complete',
+                        generation: row.body.descriptor.generation,
+                        reservation: row.body.reservation,
+                      },
+              })),
+          }),
+      );
+    const complete = completions[0].body;
+    const reserve = rows.find((row) => row.id === complete.reservation).body;
+    const cache = await caches.open('spendspacey-static-resource-v2-' + reserve.instance);
+    const entry = complete.descriptor.entries.find((entry: { url: string }) =>
+      /^\/assets\/index-.*\.js$/.test(entry.url),
+    );
+    if (corruption === 'missing') await cache.delete(entry.key);
+    else
+      await cache.put(
+        entry.key,
+        new Response('corrupt bytes', { headers: { 'content-type': 'application/javascript' } }),
+      );
+  }, corruption);
+}
+async function reopen(context: BrowserContext, origin: string) {
+  for (const page of context.pages()) await page.close();
+  const page = await context.newPage();
+  await disableHttpCache(page);
+  await page.goto(origin);
+  return page;
+}
+
+test('one online preparation persists canonical / and the next ordinary load is controlled offline', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  try {
+    await disableHttpCache(page);
+    await page.goto(host.origin);
+    await expect(page.getByTestId('offline-readiness')).toContainText('Prepared for offline', {
+      timeout: 20000,
     });
-    expect(
-      await page.evaluate(async () => !!(await navigator.serviceWorker.getRegistration())!.waiting),
-    ).toBe(false);
-    await expect(page.getByText('An update is ready.', { exact: false })).toHaveCount(0);
+    expect(host.state.requests).not.toContain('/index.html');
+    expect(await page.evaluate(() => navigator.serviceWorker.controller)).toBeNull();
+    const redirect = await context.request.get(host.origin + '/index.html?synthetic=1', {
+      maxRedirects: 0,
+    });
+    expect(redirect.status()).toBe(308);
+    expect(redirect.headers().location).toBe('/?synthetic=1');
     await setOffline(context, true);
     await page.reload();
-    await expect(page.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
     await expect(page.getByTestId('offline-readiness')).toContainText('ready for offline');
+    expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+    await expect(page.getByRole('heading', { name: 'Spendspacey' })).toBeVisible();
+    await expect(page.goto(host.origin + '/index.html')).rejects.toThrow();
   } finally {
     await setOffline(context, false);
     await host.close();
   }
 });
 
-for (const corruption of ['missing', 'mismatched'])
-  test(`${corruption} chunks repair once online, preserve storage, and never reload callbacks`, async ({
+test('unknown, missing, API and query-bearing paths have no offline worker fallback', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  try {
+    await prepared(page, host.origin);
+    const before = await inventory(page);
+    await setOffline(context, true);
+    for (const path of [
+      '/unknown',
+      '/assets/missing-abcdefgh.js',
+      '/api/private',
+      '/?private=value',
+    ]) {
+      expect(
+        await page.evaluate(async (path) => {
+          try {
+            await fetch(path);
+            return false;
+          } catch {
+            return true;
+          }
+        }, path),
+      ).toBe(true);
+    }
+    expect((await inventory(page)).map((item) => item.url).sort()).toEqual(
+      before.map((item) => item.url).sort(),
+    );
+  } finally {
+    await setOffline(context, false);
+    await host.close();
+  }
+});
+
+for (const corruption of ['missing', 'bytes'])
+  test(`damaged waiting v2 (${corruption}) activates offline with intact v1 and survives worker restart`, async ({
     page,
     context,
   }) => {
     const host = await pwaServer();
+    host.state.directory = '.cache/installable-offline-shell/v1';
     try {
       await prepared(page, host.origin);
-      await page.evaluate(async (corruption) => {
-        localStorage.setItem('sdk-storage-sentinel', 'preserve');
-        const cache = await caches.open('spendspacey-static-v1');
-        for (const request of await cache.keys()) {
-          if (!/supabase-.*\.js/.test(request.url)) continue;
-          if (corruption === 'missing') await cache.delete(request);
-          else
-            await cache.put(
-              request,
-              new Response('wrong bytes', {
-                headers: { 'content-type': 'application/javascript' },
-              }),
-            );
-        }
-      }, corruption);
+      const first = await selection(page);
+      await waitReplacement(page, '.cache/installable-offline-shell/v2', host);
+      await damageWaiting(page, corruption);
       await setOffline(context, true);
-      // The actual lazy import now fails through Vite's preload handler.
-      await page.reload();
-      await expect(page.getByRole('alert').filter({ hasText: 'Some app files' })).toBeVisible();
-      await page.getByRole('button', { name: 'Repair and reload online' }).click();
-      expect(
-        await page.evaluate(() => sessionStorage.getItem('spendspacey.static-repair-attempt')),
-      ).toBeNull();
-      await setOffline(context, false);
-      await Promise.all([
-        page.waitForEvent('load'),
-        page.getByRole('button', { name: 'Repair and reload online' }).click(),
-      ]);
-      await expect(page.getByTestId('offline-readiness')).toContainText('ready for offline');
-      expect(await page.evaluate(() => localStorage.getItem('sdk-storage-sentinel'))).toBe(
-        'preserve',
-      );
-      // Persisted guard prevents repeated repair/reload when the same failure recurs.
-      await page.evaluate(() => {
-        sessionStorage.setItem('spendspacey.static-repair-attempt', '1');
-        window.dispatchEvent(new Event('vite:preloadError', { cancelable: true }));
-      });
-      await page.getByRole('button', { name: 'Repair and reload online' }).click();
-      await expect(page.getByRole('alert').filter({ hasText: 'Some app files' })).toBeVisible();
-      await page.goto(`${host.origin}/auth/callback?error=access_denied`);
-      await page.evaluate(() =>
-        window.dispatchEvent(new Event('vite:preloadError', { cancelable: true })),
-      );
-      await expect(page.getByRole('button', { name: 'Repair and reload online' })).toHaveCount(0);
+      const fresh = await reopen(context, host.origin);
+      await expect(fresh.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
+      await expect(fresh.getByTestId('offline-readiness')).toContainText('ready for offline');
+      expect((await selection(fresh)).head.body.selected).toBe(first.head.body.selected);
+      const cdp = await context.newCDPSession(fresh);
+      await cdp.send('ServiceWorker.enable');
+      await cdp.send('ServiceWorker.stopAllWorkers');
+      await fresh.reload();
+      await expect(fresh.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
+      await expect(fresh.getByTestId('offline-readiness')).toContainText('ready for offline');
+      expect((await message(fresh, 'STATUS')).pending).toBe(true);
     } finally {
       await setOffline(context, false);
       await host.close();
     }
   });
 
-test('first-ever offline launch has no prepared app-owned shell', async ({ page, context }) => {
+test('complete v1 → v2 → v1 rollback preserves whole offline generations and SDK/locale storage', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  host.state.directory = '.cache/installable-offline-shell/v1';
+  try {
+    await prepared(page, host.origin);
+    await page.evaluate(() => {
+      localStorage.setItem('sdk-storage-sentinel', 'preserve');
+      localStorage.setItem('spendspacey.locale', 'pt-BR');
+    });
+    let active = page;
+    for (const version of ['v2', 'v1']) {
+      await waitReplacement(active, '.cache/installable-offline-shell/' + version, host);
+      await expect(active.locator('html')).toHaveAttribute(
+        'data-synthetic-version',
+        version === 'v2' ? 'v1' : 'v2',
+      );
+      active = await reopen(context, host.origin);
+      await expect(active.locator('html')).toHaveAttribute('data-synthetic-version', version);
+      await expect(active.getByTestId('offline-readiness')).toContainText(
+        'pronta para uso offline',
+      );
+      await setOffline(context, true);
+      await active.reload();
+      await expect(active.locator('html')).toHaveAttribute('data-synthetic-version', version);
+      await setOffline(context, false);
+    }
+    expect(await active.evaluate(() => localStorage.getItem('sdk-storage-sentinel'))).toBe(
+      'preserve',
+    );
+    expect((await records(active)).filter((row) => row.body.kind === 'select')).toHaveLength(3);
+  } finally {
+    await setOffline(context, false);
+    await host.close();
+  }
+});
+
+for (const failure of ['redirect', 'fallback HTML'])
+  test(`failed replacement (${failure}) retains the previous complete worker`, async ({
+    page,
+    context,
+  }) => {
+    const host = await pwaServer();
+    host.state.directory = '.cache/installable-offline-shell/v1';
+    try {
+      await prepared(page, host.origin);
+      host.state.directory = '.cache/installable-offline-shell/v2';
+      if (failure === 'redirect') host.state.redirectPath = '/';
+      else host.state.broken = true;
+      await page.evaluate(async () => {
+        const reg = (await navigator.serviceWorker.getRegistration())!;
+        await reg.update();
+        if (reg.installing)
+          await new Promise<void>((resolve) => {
+            const worker = reg.installing!;
+            worker.addEventListener('statechange', () => {
+              if (worker.state === 'redundant') resolve();
+            });
+          });
+      });
+      expect(
+        await page.evaluate(
+          async () => !!(await navigator.serviceWorker.getRegistration())!.waiting,
+        ),
+      ).toBe(false);
+      await setOffline(context, true);
+      await page.reload();
+      await expect(page.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
+    } finally {
+      await setOffline(context, false);
+      await host.close();
+    }
+  });
+
+test('repair stages a complete replacement, never switches live windows, and selects it only after close/reopen', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  host.state.directory = '.cache/installable-offline-shell/v1';
+  try {
+    await prepared(page, host.origin);
+    await waitReplacement(page, '.cache/installable-offline-shell/v2', host);
+    await damageWaiting(page, 'missing');
+    const fallback = await reopen(context, host.origin);
+    await expect(fallback.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
+    const before = await selection(fallback);
+    const request = crypto.randomUUID();
+    expect((await message(fallback, 'REPAIR', { request, blocked: false })).repair).toBe(
+      'complete',
+    );
+    await fallback.reload();
+    await expect(fallback.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
+    const cdp = await context.newCDPSession(fallback);
+    await cdp.send('ServiceWorker.enable');
+    await cdp.send('ServiceWorker.stopAllWorkers');
+    await fallback.goto(host.origin);
+    await expect(fallback.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
+    expect((await selection(fallback)).head.body.selected).toBe(before.head.body.selected);
+    const fresh = await reopen(context, host.origin);
+    await expect(fresh.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+    await setOffline(context, true);
+    await fresh.reload();
+    await expect(fresh.getByTestId('offline-readiness')).toContainText('ready for offline');
+    expect((await selection(fresh)).head.body.fallback).toBe(before.head.body.selected);
+  } finally {
+    await setOffline(context, false);
+    await host.close();
+  }
+});
+
+test('active missing chunk produces real recovery; offline and failed repair preserve the selected cache', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  try {
+    await prepared(page, host.origin);
+    const selected = await selection(page);
+    const sdk = await page.evaluate(async (name) => {
+      const c = await caches.open(name);
+      const request = (await c.keys()).find((r) => /supabase-.*\.js$/.test(r.url))!;
+      await c.delete(request);
+      return new URL(request.url).pathname;
+    }, selected.cache);
+    await setOffline(context, true);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(page.getByRole('alert').filter({ hasText: 'Some app files' })).toBeVisible();
+    expect(
+      (await message(page, 'REPAIR', { request: crypto.randomUUID(), blocked: false })).repair,
+    ).toBe('offline');
+    await setOffline(context, false);
+    host.state.redirectPath = sdk;
+    const request = crypto.randomUUID();
+    expect((await message(page, 'REPAIR', { request, blocked: false })).repair).toBe('failed');
+    const count = host.state.requests.length;
+    await message(page, 'REPAIR', { request, blocked: false });
+    expect(host.state.requests).toHaveLength(count);
+    expect((await selection(page)).head.body.selected).toBe(selected.head.body.selected);
+    // Pending Auth processing blocks repair before any network activity.
+    expect(
+      (await message(page, 'REPAIR', { request: crypto.randomUUID(), blocked: true })).repair,
+    ).toBe('blocked');
+  } finally {
+    await setOffline(context, false);
+    await host.close();
+  }
+});
+
+test('cleanup is conservative with uncontrolled/hidden windows and preserves legacy/unrelated caches', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  try {
+    await prepared(page, host.origin);
+    await page.evaluate(async () => {
+      await (await caches.open('spendspacey-static-v1')).put('/', new Response('legacy'));
+      await (await caches.open('unrelated')).put('/', new Response('keep'));
+    });
+    const second = await context.newPage();
+    await second.goto(host.origin);
+    expect((await message(page, 'CLEANUP')).cleaned).toBe(false);
+    expect(await page.evaluate(() => caches.has('spendspacey-static-v1'))).toBe(true);
+    expect(await page.evaluate(() => caches.has('unrelated'))).toBe(true);
+  } finally {
+    await host.close();
+  }
+});
+
+test('first-ever offline launch has no app-owned shell', async ({ page, context }) => {
   const host = await pwaServer();
   try {
     await disableHttpCache(page);

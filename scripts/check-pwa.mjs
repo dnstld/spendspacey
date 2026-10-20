@@ -49,16 +49,59 @@ export function checkPwa(outDir) {
   const worker = read('sw.js').toString();
   assert.doesNotMatch(worker, /^\s*</);
   assert.doesNotMatch(worker, /self\.__WB_MANIFEST/);
-  const injected = [
-    ...worker.matchAll(/\{"integrity":"sha256-[^"]+","revision":[^{}]*,"url":"[^"#?]+"\}/g),
-  ].map((match) => JSON.parse(match[0]));
-  for (const entry of injected)
+  const injected = [...worker.matchAll(/\{"bytes":[^{}]+,"worker":"[a-f0-9]{64}"\}/g)].map(
+    (match) => JSON.parse(match[0]),
+  );
+  for (const entry of injected) {
+    const file = entry.url === '/' ? 'index.html' : entry.url.slice(1);
+    const expectedType = file.endsWith('.js')
+      ? 'application/javascript'
+      : file.endsWith('.css')
+        ? 'text/css'
+        : file.endsWith('.png')
+          ? 'image/png'
+          : file.endsWith('.woff2')
+            ? 'font/woff2'
+            : file.endsWith('.webmanifest')
+              ? 'application/manifest+json'
+              : 'text/html';
+    assert.equal(entry.type, expectedType);
+    assert.equal(entry.key, entry.url);
     assert.equal(
       entry.integrity,
-      'sha256-' + createHash('sha256').update(read(entry.url)).digest('base64'),
+      'sha256-' + createHash('sha256').update(read(file)).digest('base64'),
     );
+    assert.equal(entry.bytes, read(file).length);
+    assert.match(entry.worker, /^[a-f0-9]{64}$/);
+    assert.match(entry.implementation, /^[a-f0-9]{64}$/);
+    assert.match(entry.compatibility, /^[a-f0-9]{64}$/);
+    if (!entry.url.startsWith('/assets/')) assert.match(entry.revision, /^[a-f0-9]{32}$/);
+    if (entry.revision)
+      assert.equal(entry.revision, createHash('md5').update(read(file)).digest('hex'));
+  }
   const entries = injected.map((entry) => entry.url);
-  assert(entries.length >= 10, 'Expected injected precache entries');
+  assert(entries.length >= 11, 'Expected injected canonical inventory');
+  assert.equal(new Set(injected.map((entry) => entry.worker)).size, 1);
+  assert.equal(new Set(injected.map((entry) => entry.compatibility)).size, 1);
+  assert.equal(new Set(injected.map((entry) => entry.implementation)).size, 1);
+  // Injected entry keys are canonicalized by Workbox. Bind each worker identity
+  // to both the pre-injection implementation digest and the entire inventory.
+  const { compatibility, implementation, worker: identity } = injected[0];
+  const inventory = injected.map(({ bytes, integrity, key, revision, type, url }) => ({
+    bytes,
+    integrity,
+    key,
+    revision,
+    type,
+    url,
+  }));
+  assert.equal(
+    identity,
+    createHash('sha256')
+      .update(JSON.stringify({ compatibility, entries: inventory, implementation }))
+      .digest('hex'),
+  );
+  assert(!entries.includes('/index.html'));
   const expected = readdirSync(outDir, { recursive: true })
     .map(String)
     .filter(
@@ -75,7 +118,11 @@ export function checkPwa(outDir) {
           'icons/apple-touch-icon.png',
         ].includes(path),
     );
-  assert.deepEqual(entries.sort(), expected.sort(), 'Exact static precache inventory');
+  assert.deepEqual(
+    entries.sort(),
+    expected.map((file) => (file === 'index.html' ? '/' : '/' + file)).sort(),
+    'Exact canonical static precache inventory',
+  );
   assert(
     expected.some((path) => /^assets\/supabase-.*\.js$/.test(path)),
     'Required lazy SDK chunk',

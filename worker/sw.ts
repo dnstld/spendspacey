@@ -1,120 +1,80 @@
-import { PrecacheController } from 'workbox-precaching';
-import {
-  CACHE_POLICY,
-  CACHE_PREFIX,
-  routeRequest,
-  staticPath,
-  validStaticResponse,
-} from './policy';
+import { Generations, type WorkerInventory } from './generations';
+import { routeRequest, staticPath } from './policy';
 
-declare const self: ServiceWorkerGlobalScope;
-
-const precache = new PrecacheController({
-  cacheName: `${CACHE_PREFIX}${CACHE_POLICY}`,
-  plugins: [
-    {
-      requestWillFetch: async ({ request }) =>
-        new Request(request, { credentials: 'omit', redirect: 'error' }),
-      cacheWillUpdate: async ({ request, response }) =>
-        validStaticResponse(new URL(request.url).pathname, response) ? response : null,
-    },
-  ],
-});
-const entries = self.__WB_MANIFEST as { url: string; revision: string | null; integrity: string }[];
-if (entries.some(({ url }) => !staticPath(new URL(url, self.location.origin).pathname)))
-  throw new Error('Unreviewed static asset');
-precache.addToCacheList(entries);
-const approved = new Set(precache.getURLsToCacheKeys().keys());
-
-async function validBytes(url: string, response: Response) {
-  if (!validStaticResponse(new URL(url).pathname, response)) return false;
-  const entry = entries.find((entry) => new URL(entry.url, self.location.origin).href === url);
-  const digest = await crypto.subtle.digest('SHA-256', await response.clone().arrayBuffer());
-  const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
-  return entry?.integrity === `sha256-${hash}`;
-}
-async function complete() {
-  const cache = await caches.open(precache.strategy.cacheName);
-  for (const [url, key] of precache.getURLsToCacheKeys()) {
-    const response = await cache.match(key);
-    if (!response || !(await validBytes(url, response))) return false;
-  }
-  return true;
-}
-
+declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: WorkerInventory[] };
+const inventory = self.__WB_MANIFEST as WorkerInventory[];
+const engine = new Generations(
+  {
+    origin: self.location.origin,
+    caches,
+    locks: self.navigator.locks,
+    fetch: (request) => fetch(request),
+    windows: async () => [
+      ...(await self.clients.matchAll({ type: 'window', includeUncontrolled: true })),
+    ],
+    busy: () => !!self.registration.installing || !!self.registration.waiting,
+    online: () => self.navigator.onLine !== false,
+  },
+  inventory,
+);
+const startup = engine.initialize();
+let activation: Promise<void> = startup;
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    precache.install(event).then(async () => {
-      if (!(await complete())) throw new Error('Incomplete static shell');
-    }),
-  );
+  event.waitUntil(startup.then(() => engine.install()));
 });
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    (async () => {
-      await precache.activate(event);
-      // Only after complete activation; never delete unrelated caches/storage.
-      for (const name of await caches.keys()) {
-        if (name.startsWith(CACHE_PREFIX) && name !== precache.strategy.cacheName)
-          await caches.delete(name);
-      }
-      await self.clients.claim();
-    })(),
-  );
+  activation = startup
+    .then(() => engine.activate())
+    .then(() => engine.cleanup())
+    .then(() => undefined);
+  event.waitUntil(activation);
 });
-
+// Deliberately no claim, skipWaiting, forced reload or runtime caching.
 self.addEventListener('fetch', (event) => {
-  const kind = routeRequest(event.request, self.location.origin, approved);
-  // No respondWith means native network handling, with no runtime cache.
-  if (kind === 'network') return;
+  // These standard navigation hints are absent from TS's older worker lib.
+  // Unknown hints cannot prove a fresh launch, so conservatively defer promotion.
+  const navigation = event as FetchEvent & { replacesClientId?: string; isReload?: boolean };
+  const replaces =
+    navigation.isReload === true
+      ? 'reload'
+      : typeof navigation.replacesClientId === 'string'
+        ? navigation.replacesClientId
+        : typeof navigation.isReload === 'boolean'
+          ? ''
+          : 'unknown';
+  const url = new URL(event.request.url);
+  const kind = routeRequest(event.request, self.location.origin, new Set([event.request.url]));
+  if (kind === 'network' || (!staticPath(url.pathname) && kind !== 'callback')) return;
   event.respondWith(
-    (async () => {
-      const response = await precache.matchPrecache(
-        kind === 'static' ? event.request.url : '/index.html',
-      );
-      const url =
-        kind === 'static' ? event.request.url : new URL('/index.html', self.location.origin).href;
-      if (!response || !(await validBytes(url, response))) return Response.error();
-      if (kind !== 'callback') return response;
-      const headers = new Headers(response.headers);
-      headers.set('Cache-Control', 'no-store');
-      headers.set('Referrer-Policy', 'no-referrer');
-      return new Response(response.body, { status: 200, headers });
-    })(),
+    activation.then(
+      async () =>
+        (await engine.respond(event.request, event.resultingClientId, replaces)) ||
+        fetch(event.request),
+    ),
   );
 });
-
 self.addEventListener('message', (event) => {
-  if (!event.ports[0] || !['STATUS', 'REPAIR'].includes(event.data?.type)) return;
+  const port = event.ports[0];
+  if (!port || !['STATUS', 'REPAIR', 'CANCEL', 'CLEANUP'].includes(event.data?.type)) return;
+  if (event.data.type === 'CANCEL') {
+    engine.cancel(String(event.data.request));
+    port.postMessage({ cancelled: true });
+    return;
+  }
   event.waitUntil(
-    (async () => {
+    activation.then(async () => {
       try {
-        // Explicit online repair only fills this worker's missing entries. No
-        // skipWaiting, unregister, blanket deletion, or Auth/locale storage access.
         if (event.data.type === 'REPAIR') {
-          const cache = await caches.open(precache.strategy.cacheName);
-          const replacements: [string, Response][] = [];
-          for (const [url, key] of precache.getURLsToCacheKeys()) {
-            const existing = await cache.match(key);
-            if (existing && (await validBytes(url, existing))) continue;
-            const entry = entries.find(
-              (entry) => new URL(entry.url, self.location.origin).href === url,
-            )!;
-            const response = await fetch(url, {
-              credentials: 'omit',
-              redirect: 'error',
-              cache: 'reload',
-              integrity: entry.integrity,
-            });
-            if (!(await validBytes(url, response))) throw new Error('Invalid replacement');
-            replacements.push([key, response]);
-          }
-          for (const [key, response] of replacements) await cache.put(key, response);
-        }
-        event.ports[0].postMessage({ ready: await complete() });
+          const source = event.source as Client | null;
+          const blocked =
+            event.data.blocked !== false || !source || new URL(source.url).pathname !== '/';
+          port.postMessage(await engine.repair(String(event.data.request), blocked));
+        } else if (event.data.type === 'CLEANUP')
+          port.postMessage({ cleaned: await engine.cleanup() });
+        else port.postMessage(await engine.status());
       } catch {
-        event.ports[0].postMessage({ ready: false });
+        port.postMessage({ ready: false, repair: 'failed' });
       }
-    })(),
+    }),
   );
 });

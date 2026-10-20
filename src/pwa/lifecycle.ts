@@ -1,12 +1,19 @@
 import { isCallbackPath } from '@/lib/callbackRoute';
-
 type PwaState = {
-  readiness: 'preparing' | 'ready' | 'unavailable';
+  readiness: 'preparing' | 'prepared' | 'ready' | 'unavailable';
   waiting: boolean;
   recovery: boolean;
   repairing: boolean;
+  repaired: boolean;
 };
-let state: PwaState = { readiness: 'preparing', waiting: false, recovery: false, repairing: false };
+type Status = { ready?: boolean; prepared?: boolean; pending?: boolean; repair?: string };
+let state: PwaState = {
+  readiness: 'preparing',
+  waiting: false,
+  recovery: false,
+  repairing: false,
+  repaired: false,
+};
 const listeners = new Set<() => void>();
 let started = false;
 let registration: ServiceWorkerRegistration | undefined;
@@ -24,45 +31,56 @@ function publish(update: Partial<PwaState>) {
   state = { ...state, ...update };
   listeners.forEach((listener) => listener());
 }
-function ask(worker: ServiceWorker, type: 'STATUS' | 'REPAIR'): Promise<boolean> {
+function ask(
+  worker: ServiceWorker,
+  type: string,
+  details: Record<string, unknown> = {},
+): Promise<Status> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     const timer = window.setTimeout(() => {
       channel.port1.close();
-      resolve(false);
-    }, 15_000);
-    channel.port1.onmessage = (event: MessageEvent<{ ready?: boolean }>) => {
+      resolve({ ready: false });
+    }, 15000);
+    channel.port1.onmessage = (event: MessageEvent<Status>) => {
       clearTimeout(timer);
       channel.port1.close();
-      resolve(event.data.ready === true);
+      resolve(event.data);
     };
     try {
-      worker.postMessage({ type }, [channel.port2]);
+      worker.postMessage({ type, ...details }, [channel.port2]);
     } catch {
       clearTimeout(timer);
       channel.port1.close();
-      resolve(false);
+      resolve({ ready: false });
     }
   });
 }
 async function readiness() {
   const controller = navigator.serviceWorker.controller;
-  const ready = controller && (await ask(controller, 'STATUS'));
-  publish({ readiness: ready ? 'ready' : 'unavailable' });
-  // Keep the one-reload guard across a failed reload. Clear only when the whole
-  // shell and bootstrap have recovered, so persistent preload failures cannot loop.
-  if (ready && !state.recovery) {
-    try {
-      sessionStorage.removeItem(repairKey);
-    } catch {
-      /* Optional storage. */
-    }
+  const worker = controller ?? registration?.active;
+  const result = worker ? await ask(worker, 'STATUS') : {};
+  publish({
+    readiness: result.ready
+      ? controller
+        ? 'ready'
+        : 'prepared'
+      : result.prepared
+        ? 'prepared'
+        : registration?.installing
+          ? 'preparing'
+          : 'unavailable',
+    recovery: state.recovery || !!result.pending || (!!controller && result.ready === false),
+  });
+  if (registration?.waiting) {
+    const waiting = await ask(registration.waiting, 'STATUS');
+    publish({ waiting: waiting.prepared === true });
   }
 }
 export function checkForUpdate() {
   if (!registration || navigator.onLine === false || document.visibilityState === 'hidden') return;
   if (checking) return checking;
-  if (Date.now() - lastCheck < 30_000) return;
+  if (Date.now() - lastCheck < 30000) return;
   lastCheck = Date.now();
   checking = registration
     .update()
@@ -101,36 +119,38 @@ export function startPwa(production = import.meta.env.PROD) {
     .register('/sw.js', { scope: '/', updateViaCache: 'none' })
     .then((value) => {
       registration = value;
-      function waiting() {
-        publish({ waiting: !!value.waiting });
-      }
-      waiting();
-      value.addEventListener('updatefound', () => {
-        const worker = value.installing;
-        worker?.addEventListener('statechange', () => {
-          waiting();
-          if (worker.state === 'activated') void readiness();
+      const watched = new WeakSet<ServiceWorker>();
+      function watch(worker: ServiceWorker | null) {
+        if (!worker || watched.has(worker)) return;
+        watched.add(worker);
+        worker.addEventListener('statechange', () => {
+          void readiness();
         });
-      });
+      }
+      value.addEventListener('updatefound', () => watch(value.installing));
+      watch(value.installing);
+      void navigator.serviceWorker.ready.then(() => readiness());
       void readiness();
       void checkForUpdate();
     })
-    .catch(() => {
-      publish({ readiness: 'unavailable' });
-    });
+    .catch(() => publish({ readiness: 'unavailable' }));
 }
-export async function repairStaticShell() {
-  if (state.repairing || navigator.onLine === false || isCallbackPath(location.pathname)) return;
+export async function repairStaticShell(blocked = false) {
+  if (blocked || state.repairing || navigator.onLine === false || isCallbackPath(location.pathname))
+    return;
   const worker = navigator.serviceWorker?.controller;
   if (!worker) return;
+  let request: string;
   try {
-    if (sessionStorage.getItem(repairKey)) return;
-    sessionStorage.setItem(repairKey, '1');
+    request = crypto.randomUUID();
+    sessionStorage.setItem(repairKey, request);
   } catch {
     return;
-  } // Cannot guarantee the reload bound without storage.
+  }
   publish({ repairing: true });
-  const ready = await ask(worker, 'REPAIR');
-  publish({ repairing: false });
-  if (ready) location.reload();
+  // A new ID exists only after an explicit click. Neither startup nor reconnect
+  // replays it; the worker persists the boundary before touching the network.
+  const result = await ask(worker, 'REPAIR', { request, blocked: false });
+  publish({ repairing: false, repaired: result.repair === 'complete' });
+  await readiness();
 }

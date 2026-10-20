@@ -21,6 +21,10 @@ export const ptBR = {
     unknownEmail: 'E-mail indisponível',
   },
   pwa: {
+    prepared:
+      'Preparado para uso offline. Recarregue ou abra o Spendspacey novamente para concluir.',
+    repaired:
+      'O reparo foi concluído. Feche todas as janelas do Spendspacey e abra o aplicativo novamente.',
     preparing: 'Preparando o aplicativo para uso offline…',
     ready:
       'A estrutura do aplicativo está pronta para uso offline. Entrar e sair precisam de conexão.',
@@ -29,8 +33,8 @@ export const ptBR = {
     waiting:
       'Uma atualização está pronta. Feche todas as janelas do Spendspacey e abra o aplicativo novamente para usá-la.',
     recovery:
-      'Alguns arquivos do aplicativo não carregaram. Reconecte-se e tente reparar e recarregar uma vez. Se continuar falhando, feche todas as janelas e abra novamente com conexão.',
-    repair: 'Reparar e recarregar com conexão',
+      'Alguns arquivos precisam de recuperação. Reconecte-se, repare com conexão, feche todas as janelas e abra novamente. Nenhum login ou saída será iniciado.',
+    repair: 'Reparar com conexão',
   },
   errors: {
     offlineRestore:

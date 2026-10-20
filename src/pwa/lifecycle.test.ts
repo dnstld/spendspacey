@@ -27,7 +27,12 @@ describe('worker registration feature detection and update coalescing', () => {
     };
     const register = vi.fn(async () => registration);
     vi.stubGlobal('navigator', {
-      serviceWorker: { register, addEventListener: vi.fn(), controller: null },
+      serviceWorker: {
+        register,
+        addEventListener: vi.fn(),
+        controller: null,
+        ready: new Promise(() => {}),
+      },
       onLine: true,
     });
     vi.stubGlobal('caches', {});

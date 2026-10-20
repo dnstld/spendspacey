@@ -19,13 +19,15 @@ export const en = {
     unknownEmail: 'Email unavailable',
   },
   pwa: {
+    prepared: 'Prepared for offline use. Reload or reopen Spendspacey to finish.',
+    repaired: 'Repair is complete. Close all Spendspacey windows, then reopen the app.',
     preparing: 'Preparing the app for offline use…',
     ready: 'The app shell is ready for offline use. Fresh sign-in and sign-out need a connection.',
     unavailable: 'Offline readiness is unavailable. Connect to prepare or recover the app.',
     waiting: 'An update is ready. Close all Spendspacey windows, then reopen the app to use it.',
     recovery:
-      'Some app files could not load. Reconnect and try one repair and reload. If it still fails, close all app windows and reopen online.',
-    repair: 'Repair and reload online',
+      'Some app files need recovery. Reconnect and repair online, then close all app windows and reopen. No sign-in or sign-out will be started.',
+    repair: 'Repair online',
   },
   errors: {
     offlineRestore:

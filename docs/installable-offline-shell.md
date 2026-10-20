@@ -22,8 +22,11 @@ existing mark. `node scripts/generate-icons.mjs` reproduces them with local Chro
 The maskable mark fits inside the central 80% safe circle on an opaque background.
 
 Prime **the installed context itself** online; a prior Chrome tab may have separate
-storage. Wait for the localized “app shell is ready for offline use” status. It
-means an activated controlling worker has verified every required cached response,
+storage. On the first online visit, wait for localized “Prepared for offline; reload
+or reopen to finish” guidance. All resources, verified completion and selection are
+already persisted; the next ordinary load acquires control even offline. There is
+no forced reload or `clients.claim()`. On that next load, “ready for offline use”
+means the controlling worker has verified every required cached response,
 MIME and SHA-256 digest, including both bundled locales, all chunks (also the lazy
 Auth SDK), local font, button image, manifest and icons. Then airplane-mode hard
 reload and full close/reopen can load the static shell. Device language detection,
@@ -44,8 +47,10 @@ consuming a code or clearing an otherwise usable SDK session.
 ## Static boundary and lifecycle
 
 `vite-plugin-pwa` 2.0.0 and Workbox 7.4.1 use injectManifest with a reviewed static
-build allowlist. Build-generated revisions and SHA-256 integrity cover the exact
-inventory. The separate worker TypeScript context has no DOM types. Installation
+build allowlist. Emitted `index.html` supplies revision/SHA-256 bytes for canonical
+`/`; `/index.html` is never in the inventory or requested during preparation. The
+browser fixture reproduces Pages’ 308 canonicalization. Build-generated revisions
+and SHA-256 integrity cover the exact inventory. The separate worker TypeScript context has no DOM types. Installation
 omits credentials and rejects redirects, fallback HTML and incorrect MIME/bytes.
 No runtime caching route exists. Only exact approved same-origin static GETs and
 query-free root navigation use the cache. Authorization-bearing requests, non-GET,
@@ -67,20 +72,54 @@ Vite development does not register. Launch, online foreground and reconnect chec
 are coalesced with one in-flight check and a 30-second floor. A replacement must
 finish installing before the localized waiting notice appears. Close **all** app
 windows and reopen to activate. There is no skipWaiting or controller-change reload.
-Workbox removes obsolete revisions at activation; only `spendspacey-static-` caches
-are owned, with explicit cache-policy boundary `v1`. Other caches, SDK session
-storage, locale preference and other origin data are preserved. A failed replacement
-retains the old complete worker and shell, including offline launch.
+The worker keeps isolated `spendspacey-static-resource-v2-<instance>` caches and a
+reserved `spendspacey-static-meta-v2` cache. Only that metadata namespace is
+enumerated for discovery. Strict bounded schema/ownership/identity/origin/scope,
+canonical inventory/MIME/size/integrity, completion bindings and an immutable
+parent-linked selection ledger establish deterministic lineage. Metadata hashes
+are consistency checks, not an Auth or durability boundary. Metadata is never
+fetched, routed or repaired. Compatibility includes routing, offline-response,
+Auth/deployment, canonical origin/scope and a configuration digest; no keys or
+private values are persisted there. Worker identity binds the pre-injection implementation digest and the canonical
+inventory; selected-generation identity is separate, so a new worker can serve a verified older shell.
 
-Vite preload failures show localized connection/repair guidance where code can run.
-Explicit online repair validates and replaces only missing/mismatched assets from
-the active worker's own inventory, and reloads only after complete verification.
-A sessionStorage guard bounds repair/reload to one attempt across a failed reload;
-only a healthy controlled bootstrap clears it. Offline repair does nothing. Repair
-is disabled during callbacks and cannot activate a waiting version. If a previous
-release's assets are no longer hosted, close all app windows and reopen online to
-activate a complete replacement. When entry code cannot run at all, browser-level
-reconnect/close/reopen is needed; the app cannot display its own recovery UI then.
+Every startup restores committed selection and all fetch/status handling waits for
+initialization. Resources precede verified completion, then selection. Activation
+revalidates every replacement byte; a damaged waiting build retains/selects the
+independently verified predecessor. If neither works, neither is deleted. Existing
+windows stay pinned and unusable resources report recovery instead of borrowing
+another generation's chunks. Missing/contradictory/unsupported/incompatible or
+ambiguous metadata fails closed; cache order and timestamps never resolve it.
+
+Selected plus independently verified compatible fallback is a retention target,
+not a two-cache ceiling. Cleanup requires no windows at all, including uncontrolled,
+hidden, unknown or unresponsive windows, no installing/waiting worker and reliable
+origin-wide coordination. Any uncertainty defers deletion. Immutable reservations
+protect unselected installations/staging, and persisted in-flight repair references
+protect source resources. Only exact historically selected caches outside the
+retained set can be deleted. Origin-wide Web Locks coordinate worker versions;
+without them repair/cleanup defer. Legacy `b9c61fe` caches have no trustworthy
+descriptors: do not migrate/select/delete them. SDK storage, locale and unrelated
+caches remain untouched. Metadata is bounded to 1,024 records of at most 64 KiB;
+unsupported/over-limit state reports unavailable and defers cleanup rather than
+attempting guessed compaction. Each inventory is at most 128 entries, 2 MiB per
+resource and 8 MiB total.
+
+Explicit repair persists its unique attempt boundary **before** network work,
+then verifies copied/downloaded canonical resources in a separate reserved staging
+cache. A cross-worker single-flight lock and a cancelling 12-second total deadline
+bound it. Failure, interruption, cancellation or offline status never selects
+staging, removes the working generation or automatically retries. The same attempt
+ID cannot be replayed after termination. A later explicit click creates a new
+attempt. Repair is blocked during callback/Auth processing and never makes an
+Auth/token/API request. Successful repair shows localized close/reopen guidance;
+it never reloads or changes active windows. The first fresh root navigation after
+all earlier relevant windows close commits the single successful pending result;
+a reload (`isReload`/`replacesClientId` navigation hints) is not that boundary. Unknown navigation hints defer promotion. Restart alone never promotes
+it. If a pinned selection is damaged, a verified committed fallback can likewise
+be selected only on a fresh launch after closure. Multiple successful results or
+uncertain clients defer selection. When entry code cannot run, reconnect and close
+all windows/reopen; the app cannot display recovery UI without executable code.
 
 ## Worker-aware rollback
 
@@ -95,8 +134,8 @@ normal activation; tell users to close all app windows and reopen online. Verify
 online sign-in/callback and then offline launch on the installed iPhone. Do not
 clear SDK session storage, locale preference, unrelated caches, or production data.
 If no accepted PWA replacement exists yet, stop publication and prepare/review a
-complete compatible replacement before using this procedure. The desktop v1/v2
-suite demonstrates the mechanism; actual installed-iPhone update/rollback evidence
+complete compatible replacement before using this procedure. The desktop v1 → v2 → v1
+suite demonstrates complete rollback and damaged-v2 fallback; actual installed-iPhone update/rollback evidence
 remains task 3.4.
 
 ## Verification and pending acceptance
@@ -126,8 +165,10 @@ the existing Chromium/Linux job, with synthetic-only failure artifacts, pinned
 actions, no Lighthouse score gate and no additional browser matrix. The tests use
 CDP to clear/disable HTTP caching, await activation/control and readiness, exercise
 both locales offline on reload/new pages, inspect every worker cache after synthetic
-Auth/avatar/API traffic, and exercise complete/failed worker replacement, owned
-cleanup and bounded repair. Existing canonical/preview/denied-origin, callback,
+Auth/avatar/API traffic, and exercise complete/corrupted waiting replacement, restart, rollback, conservative
+cleanup and staged repair without live switching. Engine tests cover persistence
+interruptions, metadata rejection, three-generation retention, cross-worker
+coordination and successful/failed/offline/timed-out/cancelled/interrupted repair. Existing canonical/preview/denied-origin, callback,
 localization, SDK failure/race, build/header/CSP and secret checks remain required.
 
 Tasks **3.2, 3.3, 3.4 remain unchecked** until post-merge hosted and PM evidence:

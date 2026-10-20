@@ -12,7 +12,14 @@ const types: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 };
 export async function pwaServer() {
-  const state = { directory: 'dist', broken: false, requests: [] as string[], privateRequests: 0 };
+  const state = {
+    directory: 'dist',
+    broken: false,
+    redirectPath: '',
+    delayPath: '',
+    requests: [] as string[],
+    privateRequests: 0,
+  };
   const server = createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url!, 'http://localhost');
@@ -28,6 +35,15 @@ export async function pwaServer() {
         response.writeHead(200, { 'content-type': 'text/plain' }).end('synthetic-private-marker');
         return;
       }
+      if (path === '/index.html') {
+        response.writeHead(308, { location: '/' + url.search, 'cache-control': 'no-cache' }).end();
+        return;
+      }
+      if (state.redirectPath === path) {
+        response.writeHead(308, { location: '/' }).end();
+        return;
+      }
+      if (state.delayPath === path) await new Promise((resolve) => setTimeout(resolve, 15000));
       const file = path === '/' || path === '/auth/callback' ? 'index.html' : path.slice(1);
       if (file.includes('..')) {
         response.writeHead(400).end();
@@ -61,6 +77,10 @@ export async function pwaServer() {
   return {
     state,
     origin: `http://localhost:${address.port}`,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
   };
 }

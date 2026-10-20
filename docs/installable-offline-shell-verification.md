@@ -12,13 +12,13 @@ is outstanding. See [the inherited acceptance](deploy-auth-shell-acceptance.md).
 | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Frozen dependency install                                    | Passed; exact vite-plugin-pwa 2.0.0 and Workbox 7.4.1 pins                                                                                                                             |
 | Prettier, ESLint, application and separate worker TypeScript | Passed                                                                                                                                                                                 |
-| Unit/component suite                                         | 296 passed in 17 files                                                                                                                                                                 |
+| Unit/component suite                                         | 349 passed in 19 files                                                                                                                                                                 |
 | Configuration rejection                                      | Passed startup/build/key/toolchain/input checks and 46 unsafe URL/Pages metadata builds                                                                                                |
 | Local build                                                  | Passed; synthetic local Auth artifact                                                                                                                                                  |
 | Pages build variants                                         | Passed production, preview and unclassified policy artifacts                                                                                                                           |
 | PWA build inventory                                          | Passed each variant: stable manifest identity/colors/root scope, actual decoded 192/512/180 PNG sizes, metadata, 11 exact static assets, SHA-256 integrity and required lazy SDK chunk |
 | Two complete worker builds                                   | Passed synthetic v1/v2 through the actual Vite/PWA pipeline                                                                                                                            |
-| Chromium full regression suite                               | 42 passed: 31 inherited auth/origin/preview tests and 11 PWA tests                                                                                                                     |
+| Chromium full regression suite                               | 48 passed: 31 inherited auth/origin/preview tests and 17 PWA tests                                                                                                                     |
 | Strengthened icon diagnostic                                 | Passed decoded opaque pixels and maskable safe-circle padding                                                                                                                          |
 | Secret scanning                                              | Passed repository candidate inventory, all synthetic local/Pages/PWA builds and Git history                                                                                            |
 | Strict OpenSpec                                              | 7 passed, 0 failed; pre-existing informational notices for future/superseded planning deltas                                                                                           |
@@ -41,14 +41,43 @@ not exchange/replay codes. Production canonical-origin and restricted preview te
 still assert no denied page SDK import/client construction or Auth request. Static
 SDK _download by the worker_ is expected; it does not execute the SDK in a denied page.
 
-Lifecycle tests exercise normal waiting with multiple open clients, complete v2
-activation/offline reload, obsolete owned entry/cache cleanup, preservation of SDK
-session/language/unrelated data, and failed replacement retaining the old complete
-shell. Real missing/corrupt lazy imports trigger Vite recovery; repair is explicit,
-online, integrity-checked, bounded across reload and disabled during callbacks.
-Offline auth/expired restoration stays localized and usable. An actual SDK logout
-500 can clear local SDK state: feedback reports that service sign-out was not
-confirmed instead of inventing server revocation or keeping stale identity.
+The fixture now returns Pages-style HTTP 308 for `/index.html` (including query
+preservation). Worker installation never requests that URL: only canonical `/` is
+precached, with revision, SHA-256, size and MIME derived from emitted `index.html`.
+The first online visit fully prepares before control; the next ordinary reload
+acquires control offline with HTTP cache disabled. Unknown/missing/API/query paths
+have no worker fallback. Unexpected redirects, opaque or wrong-URL responses,
+wrong MIME and incorrect bytes are rejected.
+
+The 46 real-engine generation tests exercise resource/completion/selection
+interruption, discovery after restart, enumeration-order independence, untrusted
+metadata rejection (structure/schema/configuration/origin/scope/inventory/mapping/
+MIME/integrity/completion/ambiguity/worker-build binding), independent predecessor verification, neither
+usable, complete v1 → v2 → v1 rollback, three-generation retention and cleanup,
+controlled/uncontrolled/hidden/unresponsive/newly navigating clients, stale-owner
+and activation-ticket rejection, concurrent startup/status/fetch/activation/repair/
+cleanup and cross-worker installation protection. Persisted reservations bind each
+installation to its observed committed parent so an older activation cannot append
+over a newer selection. Origin-wide Web Locks serialize short mutations; network
+installation/repair does not block the older offline shell.
+
+Repair tests exercise success, offline/failure/timeout/cancellation/interruption,
+persisted attempt boundaries before requests, non-replay after restart, single
+flight, separate staging, verified copy/download and unchanged selected resources
+on failure. Live/reloaded windows keep their generation; a successful pending
+repair is selected only after every earlier window closes and a fresh root launch
+occurs. Unknown navigation hints defer selection. Chromium additionally terminates
+workers, reloads and navigates without live switching, deletes/corrupts the waiting
+v2 entry before offline activation, confirms v1 selection/restoration, and verifies
+complete v1 → v2 → v1 rollback. Callback/Auth processing blocks repair. Metadata
+never enters the network, routing or repair inventory. Legacy v1 and unrelated
+caches, SDK and locale storage are preserved. Missing coordination or an unusable
+fallback defers cleanup.
+
+New feedback tests cover prepared/repaired guidance in both languages and suppress
+repair during initialization, sign-in, sign-out and callbacks. Offline Auth/expired
+restoration stays localized and usable. The actual SDK logout-500 regression is
+retained: cleared local state is reflected without claiming server revocation.
 
 The existing Linux job retains its required check name and SHA-pinned actions.
 Its new build/Chromium steps use only synthetic configuration and sanitized failure
@@ -71,45 +100,21 @@ The known non-required `Workers Builds: spendspacey` orphan trigger is left alon
 There is no approved-scope deviation. Actual Pages publication and installed-iPhone
 online/offline/update evidence remain deliberately outstanding, as required.
 
-## Changed file inventory
+## Correction file areas
 
-- `.github/workflows/checks.yml`
-- `README.md`
-- `build/pwa.ts`
-- `docs/installable-offline-shell-verification.md`
-- `docs/installable-offline-shell.md`
-- `e2e/origin.spec.ts`
-- `e2e/pwa-server.ts`
-- `e2e/pwa.spec.ts`
-- `index.html`
-- `openspec/changes/installable-offline-shell/tasks.md`
-- `package.json`
-- `pnpm-lock.yaml`
-- `public/_headers`
-- `public/icons/app-192.png`
-- `public/icons/app-512.png`
-- `public/icons/apple-touch-icon.png`
-- `public/icons/maskable-512.png`
-- `scripts/check-delivery.mjs`
-- `scripts/check-pwa.mjs`
-- `scripts/generate-icons.mjs`
-- `scripts/prepare-pwa-versions.mjs`
-- `scripts/secret-scan.mjs`
-- `src/auth/AuthProvider.tsx`
-- `src/auth/AuthScreen.tsx`
-- `src/auth/Offline.test.tsx`
-- `src/auth/callback.ts`
-- `src/auth/context.ts`
-- `src/components/Shell.tsx`
-- `src/i18n/en.ts`
-- `src/i18n/pt-BR.ts`
-- `src/index.css`
-- `src/main.tsx`
-- `src/pwa/PwaFeedback.tsx`
-- `src/pwa/lifecycle.test.ts`
-- `src/pwa/lifecycle.ts`
-- `src/pwa/policy.test.ts`
-- `tsconfig.worker.json`
-- `vite.config.ts`
-- `worker/policy.ts`
-- `worker/sw.ts`
+- `build/pwa.ts`, `vite.config.ts`, `scripts/check-pwa.mjs`: canonical emitted inventory,
+  compatibility/build digests and generated output assertions.
+- `worker/schema.ts`, `worker/generations.ts`, `worker/policy.ts`, `worker/sw.ts`:
+  bounded durable metadata, strict isolated generation routing, startup/activation,
+  recovery, rollback and conservative ownership/cleanup.
+- `src/pwa/*`, both locale files: preparation/control distinction, explicit repair,
+  localized close/reopen guidance and Auth-processing guards.
+- `test/staticGenerations.ts`, worker/unit/component tests, `e2e/pwa-server.ts`,
+  `e2e/pwa.spec.ts`: real-engine fault injection plus actual-worker Pages regressions.
+- Active proposal/design/installable-app delta/tasks and installation runbook:
+  corrected lifecycle, migration boundaries, verification and pending acceptance.
+
+Tasks 1.3 and 2.2 were reopened for correction and re-completed only after corrected
+implementation and representative engine/browser regressions passed. Tasks 1.2 and
+3.1 retain fresh full-suite evidence above. Historical b9c61fe results do not prove
+the corrected lifecycle; this record supersedes their implementation assertions.

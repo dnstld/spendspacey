@@ -20,6 +20,10 @@ Change 2/4. No profiles query, IndexedDB/Dexie, private application snapshot, ba
 - [ ] 3.3 Have the PM record the iPhone model and tested iOS/Google Chrome versions, open the production Pages URL in Chrome, use Share → Add to Home Screen, confirm the Spendspacey name/intended icon, and launch from the Home Screen. Verify standalone web-app presentation rather than an ordinary browser bookmark/tab. From that installed app, complete online sign-in/identity/sign-out, reach static readiness, and verify airplane-mode reload and full close/reopen, both languages, safe areas, touch controls, avatar fallbacks, and reconnect guidance. Record sanitized versions/URL/revision/pass-fail evidence; desktop Chromium cannot replace this manual PM gate and Safari-specific manual acceptance is not required.
 - [ ] 3.4 Publish a compatible accepted replacement merged into `main`, or identify a previously accepted complete production replacement, at that same origin and verify the waiting notice plus close-all-windows/reopen transition in the same installed iPhone Home Screen app added through Chrome; verify worker-aware recovery/rollback against complete builds. Record tested iOS/Chrome versions and sanitized update evidence without adding any application data feature.
 
+## Correction verification refinements
+
+Tasks 1.3 and 2.2 were reopened after independent reproduction of Pages' entry redirect and destructive activation of a damaged waiting generation. Re-complete only with canonical-entry and durable-generation regressions. Refresh 1.2/3.1 evidence with the full suite. Required behavior includes offline next-load control after one complete online preparation; restart-safe committed selection; independently validated rollback lineage; no switching live windows; persisted, cancellable, bounded staging repair; uncertain-client and cross-worker-safe cleanup; corrupted/incompatible metadata rejection; three-generation retention and v1 → v2 → v1 rollback. Tasks 3.2–3.4 remain external acceptance gates.
+
 ## Workflow follow-up
 
 - Review/accept the deployed installation milestone and synchronize its specs through the appropriate sync/archive workflow.

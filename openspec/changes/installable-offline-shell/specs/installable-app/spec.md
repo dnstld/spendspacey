@@ -43,11 +43,11 @@ The application SHALL make the complete static shell available offline after suc
 
 ### Requirement: Service-worker caches contain static assets only
 
-The service worker SHALL store only reviewed same-origin static build assets. It SHALL NOT store API responses, OAuth traffic, callback responses, avatars or other user information, authentication parameters, tokens, credentials, or non-GET requests. No private application data snapshot SHALL be introduced by this change.
+The service worker SHALL store only reviewed same-origin static build assets and strictly bounded reserved static-generation metadata. It SHALL NOT store API responses, OAuth traffic, callback responses, avatars or other user information, authentication parameters, tokens, credentials, or non-GET requests. No private application data snapshot SHALL be introduced by this change.
 
 #### Scenario: Sensitive traffic is excluded
 - **WHEN** sign-in, callback handling, session refresh, avatar loading, and sign-out have occurred
-- **THEN** inspecting every service-worker cache shows only approved static assets
+- **THEN** inspecting every service-worker cache shows only approved static assets and bounded reserved static-generation metadata
 - **AND** no Supabase request or callback navigation URL is used as a cache key, and no API/profile response, synthetic private identity value, or authentication secret is stored
 - **AND** the public Supabase origin and publishable key embedded in ordinary static application code are not treated as private response data
 - **AND** requests with authorization headers and arbitrary query-string variants cannot enter static caching
@@ -78,11 +78,12 @@ New application versions SHALL wait for safe activation without forcing a page r
 
 ### Requirement: Static cache versions and recovery are bounded
 
-Static caches SHALL have application-specific ownership and revisioning, remove obsolete owned assets after successful activation, and provide bounded online recovery from missing assets. Static-cache repair SHALL preserve authentication storage, language preference, and unrelated local data.
+Static caches SHALL have application-specific ownership and revisioning, conservatively remove obsolete generations only after independent selected/fallback validation and ownership checks, and provide bounded online recovery from missing assets. Static-cache repair SHALL preserve authentication storage, language preference, and unrelated local data. Reserved metadata SHALL contain only bounded static descriptors and lifecycle records, never network responses or private application data.
 
 #### Scenario: Obsolete assets are removed
-- **WHEN** a new complete version activates
-- **THEN** obsolete Spendspacey static cache entries are removed without deleting unrelated origin caches or application data
+- **WHEN** a complete selected generation and compatible rollback fallback are independently validated and no clients or in-flight work may require older generations
+- **THEN** obsolete historically selected resource caches may be removed without deleting unrelated origin caches or application data
+- **AND** uncertainty defers cleanup; legacy caches without trustworthy metadata are not migrated or selected
 - **AND** cache-policy schema changes have an explicit version boundary
 
 #### Scenario: A required chunk is missing
@@ -125,3 +126,57 @@ Completion SHALL require manual PM installation from Chrome on an iPhone and sta
 - **AND** sanitized iPhone model, tested iOS and Chrome versions, deployed version, production URL, and manual PM pass/fail evidence is recorded without identity values or real-account traces
 - **AND** desktop Chromium evidence does not substitute for the actual installed-app online/offline checks; Safari-specific manual acceptance is not required
 - **AND** this change remains incomplete until actual installation/offline/update evidence passes
+
+### Requirement: Canonical entry preparation and durable generation selection
+
+The worker SHALL represent emitted `index.html` only as canonical `/`, deriving revision and integrity from emitted bytes and rejecting redirects. First online preparation SHALL completely persist resources, verified completion and committed selection in that order. The next ordinary load SHALL acquire control even offline, without automatic reload.
+
+#### Scenario: Pages canonicalizes index.html
+- **WHEN** the host redirects `/index.html` to `/`
+- **THEN** the worker prepares canonical `/` without requesting the redirected entry
+- **AND** offline next-load control and both locales work after that single online preparation
+
+#### Scenario: New worker starts without a live predecessor
+- **WHEN** the worker starts or restarts
+- **THEN** it discovers strictly validated metadata only in its reserved namespace and recomputes resource integrity
+- **AND** it restores committed selection through deterministic parent-linked lineage, independently of cache enumeration or timestamps
+- **AND** its worker identity remains distinct from the selected generation, with policy/configuration digests checked
+- **AND** malformed, incompatible, contradictory, unsupported or ambiguous metadata yields unavailable status or deferred cleanup
+
+#### Scenario: Waiting replacement loses a required resource
+- **WHEN** a complete waiting replacement becomes incomplete or corrupt before activation
+- **THEN** activation independently validates and selects its committed compatible predecessor if usable
+- **AND** neither generation is deleted if both are unusable, and resources are never mixed
+
+#### Scenario: Existing windows survive restart and repair
+- **WHEN** a worker restarts or repair completes while earlier windows remain open
+- **THEN** their committed generation remains pinned, even when unusable
+- **AND** unusable pinned resources produce recovery/unavailable feedback, without switching live windows
+- **AND** repaired pending selection occurs only on a fresh root navigation after all earlier relevant windows close, with reload/replacement and uncertain navigation hints deferring promotion
+
+#### Scenario: Repair stops or fails
+- **WHEN** explicit repair fails, times out, is cancelled, is interrupted or is requested offline
+- **THEN** its persisted attempt boundary prevents automatic restart or replay
+- **AND** a cancellable deadline bounds exact static requests in separate staging, leaving staging unselected and selected/fallback intact
+
+#### Scenario: Cleanup has uncertain ownership
+- **WHEN** controlled, uncontrolled, hidden, unresponsive, newly navigating or unidentifiable windows or cross-worker reservations may require a generation
+- **THEN** cleanup defers deletion and includes uncontrolled clients in its assessment
+- **AND** selected plus validated rollback fallback is a retention target rather than an unconditional cache limit
+
+#### Scenario: Accepted compatible rollback
+- **WHEN** compatible complete versions are selected in the order v1, v2, v1
+- **THEN** committed lineage selects the requested whole version and preserves one independently validated rollback fallback
+- **AND** SDK/locale storage and unrelated caches remain untouched; production phone acceptance remains separate
+
+#### Scenario: Cross-worker selection is stale
+- **WHEN** an older worker attempts activation or mutation after another worker commits a newer selection
+- **THEN** the installation's committed-parent boundary and immutable ownership records prevent overwriting the newer selection
+- **AND** a genuine compatible rollback requires a fresh installation reservation bound to the current selection
+
+#### Scenario: Metadata and compatibility remain static-only
+- **WHEN** metadata is discovered or used during recovery
+- **THEN** strict bounded schema, ownership, worker/generation identity, origin/scope, routing/offline/Auth/deployment compatibility, configuration digest, inventory, mappings, MIME, integrity and completion binding are checked
+- **AND** cached resource integrity is independently recomputed before use
+- **AND** no publishable keys, private configuration, credentials, tokens, sessions or user payloads are persisted in metadata
+- **AND** metadata is never fetched from network, routed, repaired or treated as an authentication or durability boundary

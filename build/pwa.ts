@@ -3,6 +3,8 @@ import type { Plugin } from 'vite';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { mimeFor } from '../worker/policy.ts';
+import { canonical } from '../worker/schema.ts';
 
 export const pwaOptions: Partial<VitePWAOptions> = {
   strategies: 'injectManifest',
@@ -48,7 +50,17 @@ export const pwaOptions: Partial<VitePWAOptions> = {
   },
 };
 
-export function pwaPlugins(): Plugin[] {
+export function pwaPlugins(policy: unknown, config: unknown): Plugin[] {
+  const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+  const compatibility = hash(
+    JSON.stringify({
+      routing: 2,
+      offlineResponse: 2,
+      authPolicy: policy,
+      configuration: hash(JSON.stringify(config)),
+      scope: '/',
+    }),
+  );
   let directory = '';
   let api: VitePluginPWAAPI;
   return [
@@ -70,19 +82,37 @@ export function pwaPlugins(): Plugin[] {
       injectManifest: {
         ...pwaOptions.injectManifest,
         manifestTransforms: [
-          async (entries) => ({
-            manifest: await Promise.all(
-              entries.map(async (entry) => ({
+          async (entries) => {
+            const manifest = await Promise.all(
+              entries.map(async (entry) => {
+                const bytes = await readFile(resolve(directory, entry.url));
+                const url = entry.url === 'index.html' ? '/' : '/' + entry.url;
+                return {
+                  url,
+                  key: url,
+                  revision: entry.revision,
+                  integrity: 'sha256-' + createHash('sha256').update(bytes).digest('base64'),
+                  type: mimeFor(url),
+                  bytes: bytes.length,
+                };
+              }),
+            );
+            manifest.sort((a, b) => (a.url < b.url ? -1 : a.url > b.url ? 1 : 0));
+            // Include compiled worker implementation identity without a circular
+            // self-hash: this is the pre-injection bundle containing its placeholder.
+            const implementation = hash(await readFile(resolve(directory, 'sw.js')));
+            const worker = hash(canonical({ entries: manifest, compatibility, implementation }));
+            return {
+              manifest: manifest.map((entry) => ({
                 ...entry,
-                integrity:
-                  'sha256-' +
-                  createHash('sha256')
-                    .update(await readFile(resolve(directory, entry.url)))
-                    .digest('base64'),
+                worker,
+                implementation,
+                compatibility,
+                size: entry.bytes,
               })),
-            ),
-            warnings: [],
-          }),
+              warnings: [],
+            };
+          },
         ],
       },
     }),
