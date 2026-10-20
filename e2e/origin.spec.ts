@@ -114,6 +114,7 @@ for (const [kind, origin] of [
     context,
     page,
   }) => {
+    test.setTimeout(90000); // Full callback/unknown-path matrix with durable ownership verification.
     const calls = await serveArtifact(context, origin, kind);
     // An expired saved session would trigger refresh if an Auth client existed.
     await context.addInitScript(
@@ -156,10 +157,17 @@ for (const [kind, origin] of [
     }
     for (const path of unrelatedPaths) {
       const url = `${origin}${path}?code=synthetic-unrelated#error=synthetic-unrelated`;
-      await page.goto(url);
+      // Unknown native Pages HTML is not an owned application document. With a
+      // controller its unbound assets fail closed; it must never borrow selection.
+      await page.goto(origin);
       await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+      await page.goto(url);
+      if (await page.evaluate(() => !!navigator.serviceWorker.controller))
+        await expect(page.getByRole('button', { name: 'Sign in with Google' })).toHaveCount(0);
+      else await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
       expect(page.url()).toBe(url);
     }
+    await page.goto(origin);
     await page.getByRole('combobox').selectOption('pt-BR');
     await expect(page.getByRole('alert')).toContainText('indisponível neste endereço');
     expect(calls.authRequests).toEqual([]);

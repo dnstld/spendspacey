@@ -1,4 +1,5 @@
 import { isCallbackPath } from '@/lib/callbackRoute';
+import type { StaticStatus } from '../../worker/generations';
 type PwaState = {
   readiness: 'preparing' | 'prepared' | 'ready' | 'unavailable';
   waiting: boolean;
@@ -6,7 +7,6 @@ type PwaState = {
   repairing: boolean;
   repaired: boolean;
 };
-type Status = { ready?: boolean; prepared?: boolean; pending?: boolean; repair?: string };
 let state: PwaState = {
   readiness: 'preparing',
   waiting: false,
@@ -19,7 +19,7 @@ let started = false;
 let registration: ServiceWorkerRegistration | undefined;
 let checking: Promise<void> | undefined;
 let lastCheck = 0;
-const repairKey = 'spendspacey.static-repair-attempt';
+const confirmations = new Set<string>();
 export const pwaSnapshot = () => state;
 export function subscribePwa(listener: () => void) {
   listeners.add(listener);
@@ -33,33 +33,65 @@ function publish(update: Partial<PwaState>) {
 }
 function ask(
   worker: ServiceWorker,
-  type: string,
-  details: Record<string, unknown> = {},
-): Promise<Status> {
+  operation: string,
+  correlation?: StaticStatus,
+): Promise<StaticStatus | undefined> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
+    const request = crypto.randomUUID();
     const timer = window.setTimeout(() => {
       channel.port1.close();
-      resolve({ ready: false });
+      resolve(undefined);
     }, 15000);
-    channel.port1.onmessage = (event: MessageEvent<Status>) => {
+    channel.port1.onmessage = (event: MessageEvent) => {
+      const reply = event.data;
+      if (
+        !reply ||
+        reply.protocol !== 3 ||
+        reply.operation !== operation ||
+        reply.request !== request ||
+        !reply.status ||
+        typeof reply.status.ready !== 'boolean' ||
+        typeof reply.status.worker !== 'string'
+      )
+        return;
       clearTimeout(timer);
       channel.port1.close();
-      resolve(event.data);
+      resolve(reply.status as StaticStatus);
     };
     try {
-      worker.postMessage({ type, ...details }, [channel.port2]);
+      worker.postMessage(
+        {
+          protocol: 3,
+          operation,
+          request,
+          ...(correlation
+            ? { worker: correlation.worker, epoch: correlation.epoch, binding: correlation.binding }
+            : {}),
+        },
+        [channel.port2],
+      );
     } catch {
       clearTimeout(timer);
       channel.port1.close();
-      resolve({ ready: false });
+      resolve(undefined);
     }
   });
 }
 async function readiness() {
   const controller = navigator.serviceWorker.controller;
   const worker = controller ?? registration?.active;
-  const result = worker ? await ask(worker, 'STATUS') : {};
+  const result: Partial<StaticStatus> = (worker ? await ask(worker, 'HELLO') : undefined) ?? {};
+  if (
+    worker &&
+    controller &&
+    'binding' in result &&
+    result.binding &&
+    !confirmations.has(result.binding)
+  ) {
+    confirmations.add(result.binding);
+    void ask(worker, 'CONFIRM', result as StaticStatus);
+  }
   publish({
     readiness: result.ready
       ? controller
@@ -71,11 +103,12 @@ async function readiness() {
           ? 'preparing'
           : 'unavailable',
     recovery: state.recovery || !!result.pending || (!!controller && result.ready === false),
+    repaired: result.repair === 'complete' && result.pending === true,
   });
   if (registration?.waiting) {
-    const waiting = await ask(registration.waiting, 'STATUS');
-    publish({ waiting: waiting.prepared === true });
-  }
+    const waiting = await ask(registration.waiting, 'HELLO');
+    publish({ waiting: waiting?.prepared === true });
+  } else publish({ waiting: false });
 }
 export function checkForUpdate() {
   if (!registration || navigator.onLine === false || document.visibilityState === 'hidden') return;
@@ -136,21 +169,16 @@ export function startPwa(production = import.meta.env.PROD) {
     .catch(() => publish({ readiness: 'unavailable' }));
 }
 export async function repairStaticShell(blocked = false) {
-  if (blocked || state.repairing || navigator.onLine === false || isCallbackPath(location.pathname))
-    return;
-  const worker = navigator.serviceWorker?.controller;
-  if (!worker) return;
-  let request: string;
-  try {
-    request = crypto.randomUUID();
-    sessionStorage.setItem(repairKey, request);
-  } catch {
-    return;
-  }
-  publish({ repairing: true });
-  // A new ID exists only after an explicit click. Neither startup nor reconnect
-  // replays it; the worker persists the boundary before touching the network.
-  const result = await ask(worker, 'REPAIR', { request, blocked: false });
-  publish({ repairing: false, repaired: result.repair === 'complete' });
-  await readiness();
+  if (blocked || state.repairing || isCallbackPath(location.pathname)) return;
+  if (!navigator.serviceWorker?.controller) return;
+  // Deliberate navigation opens the independent recovery surface. It cannot inherit
+  // the application's Auth activity or execute a damaged/lazy application bundle.
+  const worker = navigator.serviceWorker.controller;
+  const status = await ask(worker, 'HELLO');
+  if (
+    status?.binding &&
+    status.authority === 'application' &&
+    (await ask(worker, 'RECOVERY', status))
+  )
+    location.assign('/');
 }

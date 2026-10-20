@@ -24,7 +24,7 @@ export const ptBR = {
     prepared:
       'Preparado para uso offline. Recarregue ou abra o Spendspacey novamente para concluir.',
     repaired:
-      'O reparo foi concluído. Feche todas as janelas do Spendspacey e abra o aplicativo novamente.',
+      'O reparo foi concluído. Recarregue ou reabra o Spendspacey para usá-lo. Outros documentos abertos mantêm os arquivos atuais.',
     preparing: 'Preparando o aplicativo para uso offline…',
     ready:
       'A estrutura do aplicativo está pronta para uso offline. Entrar e sair precisam de conexão.',
@@ -33,8 +33,8 @@ export const ptBR = {
     waiting:
       'Uma atualização está pronta. Feche todas as janelas do Spendspacey e abra o aplicativo novamente para usá-la.',
     recovery:
-      'Alguns arquivos precisam de recuperação. Reconecte-se, repare com conexão, feche todas as janelas e abra novamente. Nenhum login ou saída será iniciado.',
-    repair: 'Reparar com conexão',
+      'Alguns arquivos precisam de recuperação. Abra a recuperação, reconecte e inicie o reparo. Depois recarregue ou reabra o Spendspacey. Outros documentos mantêm seus arquivos. Nenhum login ou saída será iniciado.',
+    repair: 'Abrir recuperação',
   },
   errors: {
     offlineRestore:

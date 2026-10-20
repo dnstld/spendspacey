@@ -11,7 +11,7 @@ Change 2/4. No profiles query, IndexedDB/Dexie, private application snapshot, ba
 ## 2. Offline auth feedback and worker lifecycle
 
 - [x] 2.1 Keep shell/language controls usable while SDK restoration needs unavailable network; add typed localized sign-in/sign-out connection guidance and offline callback recovery without queued/replayed operations. Verify component and browser cases for expired/offline initialization, query/fragment scrubbing, duplicate exchange protection, actual SDK failure states, and preserved Phase 1 race/localization safeguards.
-- [x] 2.2 Add normal waiting-update guidance, owned cache revision/cleanup, coalesced update checks, and bounded missing-chunk recovery. Verify a focused two-version worker test with open clients, complete offline replacement, failed installation retaining the old version, and recovery without loops or deleting SDK/locale/unrelated data. Document close-all-windows/reopen and worker-aware rollback in this group.
+- [x] 2.2 Add normal waiting-update guidance, owned cache revision/cleanup, coalesced update checks, and bounded missing-chunk recovery. Verify a focused two-version worker test with open clients, complete offline replacement, failed installation retaining the old version, and recovery without loops or deleting SDK/locale/unrelated data. Document normal waiting-worker close/reopen separately from repaired-file adoption on a new document navigation or reload, and worker-aware rollback in this group.
 
 ## 3. CI, publication, and installation acceptance
 
@@ -28,3 +28,7 @@ Tasks 1.3 and 2.2 were reopened after independent reproduction of Pages' entry r
 
 - Review/accept the deployed installation milestone and synchronize its specs through the appropriate sync/archive workflow.
 - Begin `online-profiles` only after manual iPhone/Chrome Home Screen installation/online/offline/update acceptance; profile availability is not an acceptance condition for this shell change.
+
+## Approved document ownership correction
+
+Implement immutable browser-client generation bindings and joint selection/delivery commits, writer fencing and read-back verification in a new namespace. Embed the independent localized recovery document with exact CSP hashes. Cover all interruption boundaries, explicit v2 cutover, conservative indefinite ownership retention, sealed cleanup, callback binding, bounded deliberate repair and absent-hint navigation. Re-complete 1.3/2.2 only with representative engine/browser evidence; refresh 1.2/3.1 and retest 2.1. Gates 3.2–3.4 remain unchecked.

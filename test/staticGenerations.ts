@@ -12,13 +12,20 @@ export class StaticFixture {
   fetches: Request[] = [];
   failKind = '';
   deadline = 500;
+  hook?: (point: string, name: string, key: string, response?: Response) => Promise<void>;
+  inventories = new Map<string, WorkerInventory[]>();
   releaseDelay?: () => void;
   transform?: (request: Request, response: Response) => Response;
   private locked = new Set<string>();
   private queues = new Map<string, Promise<void>>();
   caches = {
     has: async (name: string) => this.stores.has(name),
-    delete: async (name: string) => this.stores.delete(name),
+    delete: async (name: string) => {
+      await this.hook?.('beforeDelete', name, '');
+      const result = this.stores.delete(name);
+      await this.hook?.('afterDelete', name, '');
+      return result;
+    },
     keys: async () => [...this.stores.keys()],
     open: async (name: string) => {
       let rows = this.stores.get(name);
@@ -29,11 +36,18 @@ export class StaticFixture {
       const data = rows;
       return {
         keys: async () => [...data.keys()].map((url) => new Request(url)),
-        match: async (input: RequestInfo | URL) =>
-          data
+        match: async (input: RequestInfo | URL) => {
+          const key =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          await this.hook?.('match', name, key);
+          return data
             .get(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
-            ?.clone(),
+            ?.clone();
+        },
         put: async (input: RequestInfo | URL, response: Response) => {
+          const key =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          await this.hook?.('beforePut', name, key, response);
           if (
             name === META &&
             this.failKind &&
@@ -44,6 +58,7 @@ export class StaticFixture {
             typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
             response.clone(),
           );
+          await this.hook?.('afterPut', name, key, response);
         },
         delete: async (input: RequestInfo | URL) =>
           data.delete(
@@ -111,7 +126,8 @@ export class StaticFixture {
     };
   }
   async engine(version: string, compatibility?: string) {
-    compatibility ??= await digest('policy-v2');
+    compatibility ??= await digest('policy-v3');
+    const legacyCompatibility = await digest('policy-v2');
     const urls = [
       '/',
       '/manifest.webmanifest',
@@ -147,6 +163,7 @@ export class StaticFixture {
         worker: '',
         implementation,
         compatibility,
+        legacyCompatibility,
       });
       this.bodies.set(url, { body, type });
     }
@@ -158,7 +175,13 @@ export class StaticFixture {
       type,
       bytes,
     }));
-    const worker = await digest(canonical({ entries, compatibility, implementation }));
+    const worker = await digest(
+      canonical({ entries, compatibility, legacyCompatibility, implementation }),
+    );
+    this.inventories.set(
+      version,
+      inventory.map((entry) => ({ ...entry, worker })),
+    );
     return new Generations(
       this.host(),
       inventory.map((entry) => ({ ...entry, worker })),
@@ -173,43 +196,49 @@ export class StaticFixture {
   }
   async completion(engine: Generations) {
     const snapshot = await engine.snapshot();
-    if (!snapshot.head) throw new Error('No selection');
-    const body = snapshot.head.body;
-    if (body.kind !== 'select' || !body.selected) throw new Error('No selected generation');
+    const body = snapshot.selection?.body;
+    if (!body || (body.kind !== 'activate' && body.kind !== 'deliver') || !body.selected)
+      throw new Error('No selection');
     return { snapshot, ref: body.selected, body };
   }
-  async damage(engine: Generations, kind: 'missing' | 'bytes' = 'missing', own = false) {
+  async damage(
+    engine: Generations,
+    kind: 'missing' | 'bytes' = 'missing',
+    own = false,
+    path?: string,
+  ) {
     const snapshot = await engine.snapshot();
-    const completions = [...snapshot.records].filter(
-      ([, r]) => r.kind === 'complete' && r.descriptor.generation === engine.descriptor.generation,
-    );
-    const [, completion] = own
-      ? completions.at(-1)!
-      : [
-          (await this.completion(engine)).ref,
-          snapshot.records.get((await this.completion(engine)).ref)!,
-        ];
-    if (completion.kind !== 'complete') throw new Error('No completion');
-    const reservation = snapshot.records.get(completion.reservation);
-    if (reservation?.kind !== 'reserve') throw new Error('No reservation');
-    const name = 'spendspacey-static-resource-v2-' + reservation.instance;
-    const key =
-      origin +
-      completion.descriptor.entries.find((e) => /^\/assets\/index-.*\.js$/.test(e.url))!.key;
-    const rows = this.stores.get(name)!;
-    if (kind === 'missing') rows.delete(key);
+    const ref = own
+      ? [...snapshot.records]
+          .filter(
+            ([, r]) =>
+              r.kind === 'complete' &&
+              (snapshot.records.get(r.reservation) as { generation: string }).generation ===
+                engine.descriptor.generation,
+          )
+          .at(-1)![0]
+      : (await this.completion(engine)).ref;
+    const c = snapshot.records.get(ref);
+    if (c?.kind !== 'complete') throw new Error('No completion');
+    const r = snapshot.records.get(c.reservation);
+    if (r?.kind !== 'reserve') throw new Error('No reservation');
+    const entry = r.descriptor.entries.find((e) =>
+      path ? e.url === path : /^\/assets\/index-.*\.js$/.test(e.url),
+    )!;
+    const rows = this.stores.get('spendspacey-static-resource-v3-' + r.instance)!;
+    if (kind === 'missing') rows.delete(origin + entry.key);
     else
       rows.set(
-        key,
-        new Response('corrupt', { headers: { 'content-type': 'application/javascript' } }),
+        origin + entry.key,
+        new Response('corrupt', { headers: { 'content-type': entry.type } }),
       );
   }
   async mutate(record: Stored, body: unknown) {
     const rows = this.stores.get(META)!;
-    rows.delete(origin + '/__spendspacey_static_v2__/' + record.id);
+    rows.delete(origin + '/__spendspacey_ownership_v3__/' + record.id);
     const id = await digest(canonical(body));
     rows.set(
-      origin + '/__spendspacey_static_v2__/' + id,
+      origin + '/__spendspacey_ownership_v3__/' + id,
       new Response(canonical({ id, body }), { headers: { 'content-type': 'application/json' } }),
     );
   }

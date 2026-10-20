@@ -20,14 +20,15 @@ export const en = {
   },
   pwa: {
     prepared: 'Prepared for offline use. Reload or reopen Spendspacey to finish.',
-    repaired: 'Repair is complete. Close all Spendspacey windows, then reopen the app.',
+    repaired:
+      'Verified repair is ready. Reload or reopen Spendspacey to use it. Other open documents keep their current files.',
     preparing: 'Preparing the app for offline use…',
     ready: 'The app shell is ready for offline use. Fresh sign-in and sign-out need a connection.',
     unavailable: 'Offline readiness is unavailable. Connect to prepare or recover the app.',
     waiting: 'An update is ready. Close all Spendspacey windows, then reopen the app to use it.',
     recovery:
-      'Some app files need recovery. Reconnect and repair online, then close all app windows and reopen. No sign-in or sign-out will be started.',
-    repair: 'Repair online',
+      'Some app files need recovery. Open recovery, reconnect, and deliberately repair. Then reload or reopen Spendspacey. Other documents keep their files. No sign-in or sign-out starts.',
+    repair: 'Open recovery',
   },
   errors: {
     offlineRestore:

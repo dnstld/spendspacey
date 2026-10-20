@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { routeRequest, validStaticResponse } from '../../worker/policy';
+import { callbackPath, routeRequest, validStaticResponse } from '../../worker/policy';
+import { callbackPaths, unrelatedPaths } from '../../test/callbackPaths';
+import { isCallbackPath } from '@/lib/callbackRoute';
 const origin = 'https://app.example.test';
 const approved = new Set([`${origin}/`, `${origin}/assets/index-abcdefgh.js`]);
 function request(path: string, init?: RequestInit, navigation = false) {
@@ -67,3 +69,10 @@ describe('static worker request boundary', () => {
     ).toBe(false);
   });
 });
+
+it.each([...callbackPaths, ...unrelatedPaths, '/auth/%zzcallback', '/auth//callback'])(
+  'worker callback binding matches the actual router for %s',
+  (path) => {
+    expect(callbackPath(path)).toBe(isCallbackPath(path));
+  },
+);

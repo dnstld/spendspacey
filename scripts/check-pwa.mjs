@@ -1,4 +1,10 @@
 import assert from 'node:assert/strict';
+import {
+  recoveryScript,
+  recoveryStyle,
+  recoveryScriptHash,
+  recoveryStyleHash,
+} from '../worker/recovery.ts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -48,6 +54,16 @@ export function checkPwa(outDir) {
   }
   const worker = read('sw.js').toString();
   assert.doesNotMatch(worker, /^\s*</);
+  for (const [payload, expected] of [
+    [recoveryScript, recoveryScriptHash],
+    [recoveryStyle, recoveryStyleHash],
+  ]) {
+    assert.equal(expected, 'sha256-' + createHash('sha256').update(payload).digest('base64'));
+    assert(
+      worker.includes(expected),
+      'Exact recovery CSP hash must be embedded in worker implementation',
+    );
+  }
   assert.doesNotMatch(worker, /self\.__WB_MANIFEST/);
   const injected = [...worker.matchAll(/\{"bytes":[^{}]+,"worker":"[a-f0-9]{64}"\}/g)].map(
     (match) => JSON.parse(match[0]),
@@ -86,7 +102,7 @@ export function checkPwa(outDir) {
   assert.equal(new Set(injected.map((entry) => entry.implementation)).size, 1);
   // Injected entry keys are canonicalized by Workbox. Bind each worker identity
   // to both the pre-injection implementation digest and the entire inventory.
-  const { compatibility, implementation, worker: identity } = injected[0];
+  const { compatibility, legacyCompatibility, implementation, worker: identity } = injected[0];
   const inventory = injected.map(({ bytes, integrity, key, revision, type, url }) => ({
     bytes,
     integrity,
@@ -98,7 +114,9 @@ export function checkPwa(outDir) {
   assert.equal(
     identity,
     createHash('sha256')
-      .update(JSON.stringify({ compatibility, entries: inventory, implementation }))
+      .update(
+        JSON.stringify({ compatibility, entries: inventory, implementation, legacyCompatibility }),
+      )
       .digest('hex'),
   );
   assert(!entries.includes('/index.html'));

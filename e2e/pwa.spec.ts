@@ -225,9 +225,19 @@ test('Auth, OAuth, token, API, avatars and arbitrary static queries bypass every
     await expect(page.getByRole('alert')).toContainText('could not finish offline');
     await expect(page).toHaveURL(`${host.origin}/auth/callback`);
     const after = await inventory(page);
-    expect(after.map(({ url }) => url).sort()).toEqual(before.map(({ url }) => url).sort());
+    expect(
+      after
+        .filter((i) => i.name.includes('resource-v3'))
+        .map(({ url }) => url)
+        .sort(),
+    ).toEqual(
+      before
+        .filter((i) => i.name.includes('resource-v3'))
+        .map(({ url }) => url)
+        .sort(),
+    );
     for (const item of after) {
-      expect(item.name).toMatch(/^spendspacey-static-(resource|meta)-v2/);
+      expect(item.name).toMatch(/^spendspacey-static-(resource|ownership)-v3/);
       expect(new URL(item.url).origin).toBe(host.origin);
       expect(item.url).not.toMatch(
         /callback|token|oauth|\/api\/|\/auth\/|profiles|private|avatar|index\.html/,
@@ -285,7 +295,7 @@ test('expired SDK session offline never blocks language controls or invents sign
 
 async function records(page: Page) {
   return page.evaluate(async () => {
-    const cache = await caches.open('spendspacey-static-meta-v2');
+    const cache = await caches.open('spendspacey-static-ownership-v3');
     return (await Promise.all(
       (await cache.keys()).map(async (request) => await (await cache.match(request))!.json()),
     )) as { id: string; body: Record<string, unknown> }[];
@@ -293,34 +303,65 @@ async function records(page: Page) {
 }
 async function selection(page: Page) {
   const rows = await records(page);
-  const commits = rows.filter((row) => row.body.kind === 'select');
-  const parents = new Set(commits.map((row) => row.body.parent));
-  const head = commits.filter((row) => !parents.has(row.id));
-  expect(head).toHaveLength(1);
+  const commits = rows
+    .filter((row) => row.body.kind === 'activate' || row.body.kind === 'deliver')
+    .sort((a, b) => Number(a.body.sequence) - Number(b.body.sequence));
+  const head = [commits.at(-1)!];
   const complete = rows.find((row) => row.id === head[0].body.selected)!;
   const reservation = rows.find((row) => row.id === complete.body.reservation)!;
   return {
     head: head[0],
     complete,
-    cache: 'spendspacey-static-resource-v2-' + String(reservation.body.instance),
+    cache: 'spendspacey-static-resource-v3-' + String(reservation.body.instance),
   };
 }
-async function message(page: Page, type: string, details: Record<string, unknown> = {}) {
+async function message(page: Page, operation: string, details: Record<string, unknown> = {}) {
   return page.evaluate(
-    async ({ type, details }) => {
+    async ({ operation, details }) => {
       const worker =
         navigator.serviceWorker.controller ??
         (await navigator.serviceWorker.getRegistration())!.active!;
-      return await new Promise<Record<string, unknown>>((resolve) => {
-        const channel = new MessageChannel();
-        channel.port1.onmessage = (event) => {
-          channel.port1.close();
-          resolve(event.data);
-        };
-        worker.postMessage({ type, ...details }, [channel.port2]);
-      });
+      async function send(op: string, correlation?: Record<string, unknown>) {
+        return new Promise<Record<string, unknown>>((resolve) => {
+          const channel = new MessageChannel();
+          const request =
+            typeof details.request === 'string' ? details.request : crypto.randomUUID();
+          const timer = setTimeout(() => {
+            channel.port1.close();
+            resolve({});
+          }, 20000);
+          channel.port1.onmessage = (event) => {
+            if (
+              event.data.protocol !== 3 ||
+              event.data.request !== request ||
+              event.data.operation !== op
+            )
+              return;
+            clearTimeout(timer);
+            channel.port1.close();
+            resolve(event.data.status);
+          };
+          worker.postMessage(
+            {
+              protocol: 3,
+              operation: op,
+              request,
+              ...(correlation
+                ? {
+                    worker: correlation.worker,
+                    epoch: correlation.epoch,
+                    binding: correlation.binding,
+                  }
+                : {}),
+            },
+            [channel.port2],
+          );
+        });
+      }
+      const hello = await send('HELLO');
+      return operation === 'STATUS' ? hello : send(operation, hello);
     },
-    { type, details },
+    { operation, details },
   );
 }
 async function waitReplacement(
@@ -336,77 +377,42 @@ async function waitReplacement(
   await expect
     .poll(
       async () =>
-        await page.evaluate(async (expectedScript) => {
+        page.evaluate(async (expectedScript) => {
           const reg = await navigator.serviceWorker.getRegistration();
           if (reg?.waiting?.state !== 'installed' || reg.installing) return false;
-          const meta = await caches.open('spendspacey-static-meta-v2');
+          const meta = await caches.open('spendspacey-static-ownership-v3');
           const rows = await Promise.all(
-            (await meta.keys()).map(async (request) => await (await meta.match(request))!.json()),
+            (await meta.keys()).map(async (r) => (await meta.match(r))!.json()),
           );
-          const selected = new Set(
-            rows.filter((row) => row.body.kind === 'select').map((row) => row.body.selected),
-          );
-          const candidate = rows.find(
+          return rows.some(
             (row) =>
               row.body.kind === 'complete' &&
-              !selected.has(row.id) &&
-              row.body.descriptor.entries.some(
-                (entry: { url: string }) => entry.url === expectedScript,
-              ),
-          );
-          if (!candidate) return false;
-          const result = await new Promise<{ worker: string; prepared: boolean }>((resolve) => {
-            const channel = new MessageChannel();
-            channel.port1.onmessage = (event) => {
-              channel.port1.close();
-              resolve(event.data);
-            };
-            reg.waiting!.postMessage({ type: 'STATUS' }, [channel.port2]);
-          });
-          return (
-            result.prepared &&
-            rows.find((row) => row.id === candidate.body.reservation).body.worker === result.worker
+              rows
+                .find((r) => r.id === row.body.reservation)
+                .body.descriptor.entries.some((e: { url: string }) => e.url === expectedScript),
           );
         }, expectedScript),
       { timeout: 20000 },
     )
     .toBe(true);
 }
+
 async function damageWaiting(page: Page, corruption: string) {
   await page.evaluate(async (corruption) => {
-    const meta = await caches.open('spendspacey-static-meta-v2');
+    const meta = await caches.open('spendspacey-static-ownership-v3');
     const rows = await Promise.all(
-      (await meta.keys()).map(async (request) => await (await meta.match(request))!.json()),
+      (await meta.keys()).map(async (r) => (await meta.match(r))!.json()),
     );
     const used = new Set(
-      rows.filter((row) => row.body.kind === 'select').map((row) => row.body.selected),
+      rows
+        .filter((r) => r.body.kind === 'activate' || r.body.kind === 'deliver')
+        .map((r) => r.body.selected),
     );
-    const completions = rows.filter((row) => row.body.kind === 'complete' && !used.has(row.id));
-    if (completions.length !== 1)
-      throw new Error(
-        'Expected one unselected completion: ' +
-          JSON.stringify({
-            used: [...used],
-            rows: rows
-              .filter((row) => row.body.kind === 'complete' || row.body.kind === 'select')
-              .map((row) => ({
-                id: row.id,
-                body:
-                  row.body.kind === 'select'
-                    ? row.body
-                    : {
-                        kind: 'complete',
-                        generation: row.body.descriptor.generation,
-                        reservation: row.body.reservation,
-                      },
-              })),
-          }),
-      );
-    const complete = completions[0].body;
-    const reserve = rows.find((row) => row.id === complete.reservation).body;
-    const cache = await caches.open('spendspacey-static-resource-v2-' + reserve.instance);
-    const entry = complete.descriptor.entries.find((entry: { url: string }) =>
-      /^\/assets\/index-.*\.js$/.test(entry.url),
+    const c = rows.filter((r) => r.body.kind === 'complete' && !used.has(r.id)).at(-1)!;
+    const r = rows.find((r) => r.id === c.body.reservation).body;
+    const cache = await caches.open('spendspacey-static-resource-v3-' + r.instance);
+    const entry = r.descriptor.entries.find((e: { url: string }) =>
+      /^\/assets\/index-.*\.js$/.test(e.url),
     );
     if (corruption === 'missing') await cache.delete(entry.key);
     else
@@ -415,6 +421,31 @@ async function damageWaiting(page: Page, corruption: string) {
         new Response('corrupt bytes', { headers: { 'content-type': 'application/javascript' } }),
       );
   }, corruption);
+}
+async function damageSelected(page: Page, path = 'supabase', kind = 'missing') {
+  const selected = await selection(page);
+  return page.evaluate(
+    async ({ name, path, kind }) => {
+      const cache = await caches.open(name);
+      const entry = (await cache.keys()).find((r) =>
+        path === '/'
+          ? new URL(r.url).pathname === '/'
+          : path === 'bootstrap'
+            ? /\/assets\/index-.*\.js$/.test(r.url)
+            : r.url.includes('supabase-'),
+      )!;
+      if (kind === 'missing') await cache.delete(entry);
+      else
+        await cache.put(
+          entry,
+          new Response('corrupt', {
+            headers: { 'content-type': path === '/' ? 'text/html' : 'application/javascript' },
+          }),
+        );
+      return new URL(entry.url).pathname;
+    },
+    { name: selected.cache, path, kind },
+  );
 }
 async function reopen(context: BrowserContext, origin: string) {
   for (const page of context.pages()) await page.close();
@@ -480,8 +511,16 @@ test('unknown, missing, API and query-bearing paths have no offline worker fallb
         }, path),
       ).toBe(true);
     }
-    expect((await inventory(page)).map((item) => item.url).sort()).toEqual(
-      before.map((item) => item.url).sort(),
+    expect(
+      (await inventory(page))
+        .filter((i) => i.name.includes('resource-v3'))
+        .map((item) => item.url)
+        .sort(),
+    ).toEqual(
+      before
+        .filter((i) => i.name.includes('resource-v3'))
+        .map((item) => item.url)
+        .sort(),
     );
   } finally {
     await setOffline(context, false);
@@ -512,7 +551,7 @@ for (const corruption of ['missing', 'bytes'])
       await fresh.reload();
       await expect(fresh.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
       await expect(fresh.getByTestId('offline-readiness')).toContainText('ready for offline');
-      expect((await message(fresh, 'STATUS')).pending).toBe(true);
+      expect((await message(fresh, 'STATUS')).ready).toBe(true);
     } finally {
       await setOffline(context, false);
       await host.close();
@@ -551,7 +590,7 @@ test('complete v1 → v2 → v1 rollback preserves whole offline generations and
     expect(await active.evaluate(() => localStorage.getItem('sdk-storage-sentinel'))).toBe(
       'preserve',
     );
-    expect((await records(active)).filter((row) => row.body.kind === 'select')).toHaveLength(3);
+    expect((await records(active)).filter((row) => row.body.kind === 'activate')).toHaveLength(3);
   } finally {
     await setOffline(context, false);
     await host.close();
@@ -595,84 +634,166 @@ for (const failure of ['redirect', 'fallback HTML'])
     }
   });
 
-test('repair stages a complete replacement, never switches live windows, and selects it only after close/reopen', async ({
-  page,
-  context,
-}) => {
-  const host = await pwaServer();
-  host.state.directory = '.cache/installable-offline-shell/v1';
-  try {
-    await prepared(page, host.origin);
-    await waitReplacement(page, '.cache/installable-offline-shell/v2', host);
-    await damageWaiting(page, 'missing');
-    const fallback = await reopen(context, host.origin);
-    await expect(fallback.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
-    const before = await selection(fallback);
-    const request = crypto.randomUUID();
-    expect((await message(fallback, 'REPAIR', { request, blocked: false })).repair).toBe(
-      'complete',
-    );
-    await fallback.reload();
-    await expect(fallback.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
-    const cdp = await context.newCDPSession(fallback);
-    await cdp.send('ServiceWorker.enable');
-    await cdp.send('ServiceWorker.stopAllWorkers');
-    await fallback.goto(host.origin);
-    await expect(fallback.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
-    expect((await selection(fallback)).head.body.selected).toBe(before.head.body.selected);
-    const fresh = await reopen(context, host.origin);
-    await expect(fresh.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
-    await setOffline(context, true);
-    await fresh.reload();
-    await expect(fresh.getByTestId('offline-readiness')).toContainText('ready for offline');
-    expect((await selection(fresh)).head.body.fallback).toBe(before.head.body.selected);
-  } finally {
-    await setOffline(context, false);
-    await host.close();
-  }
-});
+for (const locale of ['en', 'pt-BR'])
+  test(`embedded cold recovery and deliberate repair adopts on reload, preserving old documents: ${locale}`, async ({
+    page,
+    context,
+  }) => {
+    const host = await pwaServer();
+    try {
+      await prepared(page, host.origin);
+      await page.getByRole('combobox').selectOption(locale);
+      const old = await context.newPage();
+      await old.goto(host.origin);
+      await expect(old.getByTestId('offline-readiness')).toContainText(/ready|pronta/);
+      const original = (await selection(page)).head.body.selected;
+      const sdk = await damageSelected(page);
+      const requests: string[] = [];
+      context.on('request', (r) => requests.push(r.url()));
+      const start = host.state.requests.length;
+      const response = await page.reload();
+      await expect(
+        page.getByRole('heading', { name: /Spendspacey recovery|Recuperação do Spendspacey/ }),
+      ).toBeVisible();
+      expect(response!.headers()['cache-control']).toBe('no-store');
+      expect(response!.headers()['content-security-policy']).toContain("connect-src 'none'");
+      expect(host.state.requests.slice(start)).not.toContain('/');
+      await expect(
+        page.getByRole('button', { name: /^Repair online$|^Reparar com conexão$/ }),
+      ).toBeEnabled();
+      await page.getByRole('button', { name: /^Repair online$|^Reparar com conexão$/ }).click();
+      await expect(page.getByRole('status')).toContainText(
+        /Verified repair is ready|O reparo verificado está pronto/,
+        { timeout: 20000 },
+      );
+      expect((await selection(page)).head.body.selected).toBe(original);
+      expect(
+        requests.filter((url) => /auth\.example|accounts\.google|\/auth\/v1|\/api\//.test(url)),
+      ).toEqual([]);
+      expect(host.state.requests.slice(start).filter((path) => path !== '/sw.js')).toEqual([sdk]);
+      const oldStatus = await message(old, 'STATUS');
+      expect(oldStatus.ready).toBe(false);
+      const oldBinding = oldStatus.binding;
+      await page.reload();
+      await expect(page.getByTestId('offline-readiness')).toContainText(/ready|pronta/);
+      expect((await message(old, 'STATUS')).binding).toBe(oldBinding);
+      expect((await message(old, 'STATUS')).ready).toBe(false);
+      await setOffline(context, true);
+      await page.reload();
+      await expect(page.getByTestId('offline-readiness')).toContainText(/ready|pronta/);
+    } finally {
+      await setOffline(context, false);
+      await host.close();
+    }
+  });
 
-test('active missing chunk produces real recovery; offline and failed repair preserve the selected cache', async ({
+for (const online of [true, false])
+  test(`missing lazy chunk survives cold reopen with recovery online=${online}`, async ({
+    page,
+    context,
+  }) => {
+    const host = await pwaServer();
+    try {
+      await prepared(page, host.origin);
+      await damageSelected(page);
+      await setOffline(context, !online);
+      for (const p of context.pages()) await p.close();
+      const fresh = await context.newPage();
+      await disableHttpCache(fresh, !online);
+      await fresh.goto(host.origin);
+      await expect(fresh.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+      await expect(fresh.getByRole('status')).toContainText(
+        online ? 'Choose Repair online' : 'You appear to be offline',
+      );
+      expect((await message(fresh, 'STATUS')).authority).toBe('recovery');
+    } finally {
+      await setOffline(context, false);
+      await host.close();
+    }
+  });
+for (const path of ['/', 'bootstrap'])
+  for (const kind of ['missing', 'corrupt'])
+    test(`independent recovery for ${kind} ${path}`, async ({ page, context }) => {
+      const host = await pwaServer();
+      try {
+        await prepared(page, host.origin);
+        await damageSelected(page, path, kind);
+        await setOffline(context, true);
+        await page.reload();
+        await expect(page.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+      } finally {
+        await setOffline(context, false);
+        await host.close();
+      }
+    });
+test('failed, timed-out and cancelled recovery preserves files and duplicate attempts remain spent', async ({
   page,
   context,
 }) => {
+  test.setTimeout(60000);
   const host = await pwaServer();
   try {
     await prepared(page, host.origin);
-    const selected = await selection(page);
-    const sdk = await page.evaluate(async (name) => {
-      const c = await caches.open(name);
-      const request = (await c.keys()).find((r) => /supabase-.*\.js$/.test(r.url))!;
-      await c.delete(request);
-      return new URL(request.url).pathname;
-    }, selected.cache);
-    await setOffline(context, true);
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await expect(page.getByRole('alert').filter({ hasText: 'Some app files' })).toBeVisible();
-    expect(
-      (await message(page, 'REPAIR', { request: crypto.randomUUID(), blocked: false })).repair,
-    ).toBe('offline');
-    await setOffline(context, false);
+    const original = (await selection(page)).head.body.selected;
+    const sdk = await damageSelected(page);
+    await page.reload();
     host.state.redirectPath = sdk;
     const request = crypto.randomUUID();
-    expect((await message(page, 'REPAIR', { request, blocked: false })).repair).toBe('failed');
+    expect((await message(page, 'REPAIR', { request })).repair).toBe('failed');
     const count = host.state.requests.length;
-    await message(page, 'REPAIR', { request, blocked: false });
-    expect(host.state.requests).toHaveLength(count);
-    expect((await selection(page)).head.body.selected).toBe(selected.head.body.selected);
-    // Pending Auth processing blocks repair before any network activity.
-    expect(
-      (await message(page, 'REPAIR', { request: crypto.randomUUID(), blocked: true })).repair,
-    ).toBe('blocked');
+    await message(page, 'REPAIR', { request });
+    expect(host.state.requests.length).toBe(count);
+    host.state.redirectPath = '';
+    host.state.delayPath = sdk;
+    await page.getByRole('button', { name: 'Repair online', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('deadline', { timeout: 20000 });
+    await page.getByRole('button', { name: 'Repair online', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Cancel repair', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: 'Cancel repair', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('cancelled');
+    expect((await selection(page)).head.body.selected).toBe(original);
   } finally {
     await setOffline(context, false);
     await host.close();
   }
 });
-
-test('cleanup is conservative with uncontrolled/hidden windows and preserves legacy/unrelated caches', async ({
+test('recovery enforces exact CSP and handles denied locale storage without executing Auth', async ({
   page,
   context,
+}) => {
+  const host = await pwaServer();
+  try {
+    await prepared(page, host.origin);
+    await damageSelected(page);
+    await context.addInitScript(() => {
+      Object.defineProperty(window, 'localStorage', {
+        get() {
+          throw new DOMException('Denied', 'SecurityError');
+        },
+      });
+    });
+    const calls: string[] = [];
+    context.on('request', (r) => calls.push(r.url()));
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+    await page.getByRole('combobox').selectOption('pt-BR');
+    await expect(page.getByRole('heading', { name: 'Recuperação do Spendspacey' })).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const script = document.createElement('script');
+        script.textContent = 'window.__unexpectedRecoveryExecution=true';
+        document.body.append(script);
+        return '__unexpectedRecoveryExecution' in window;
+      }),
+    ).toBe(false);
+    expect(calls.filter((url) => /supabase-|auth\.example|google/.test(url))).toEqual([]);
+  } finally {
+    await setOffline(context, false);
+    await host.close();
+  }
+});
+test('legacy privileged messages have no authority and unrelated caches remain untouched', async ({
+  page,
 }) => {
   const host = await pwaServer();
   try {
@@ -680,10 +801,8 @@ test('cleanup is conservative with uncontrolled/hidden windows and preserves leg
     await page.evaluate(async () => {
       await (await caches.open('spendspacey-static-v1')).put('/', new Response('legacy'));
       await (await caches.open('unrelated')).put('/', new Response('keep'));
+      navigator.serviceWorker.controller!.postMessage({ type: 'CLEANUP' });
     });
-    const second = await context.newPage();
-    await second.goto(host.origin);
-    expect((await message(page, 'CLEANUP')).cleaned).toBe(false);
     expect(await page.evaluate(() => caches.has('spendspacey-static-v1'))).toBe(true);
     expect(await page.evaluate(() => caches.has('unrelated'))).toBe(true);
   } finally {
@@ -739,6 +858,59 @@ test('offline logout preserves the session; actual SDK failure follows cleared l
     await page.getByRole('combobox').selectOption('pt-BR');
     await expect(page.getByRole('alert')).toContainText('Não foi possível sair');
     await expect(page.getByRole('main')).not.toContainText('synthetic-private-marker');
+  } finally {
+    await setOffline(context, false);
+    await host.close();
+  }
+});
+
+test('actual 069dbc50 worker installs, cuts over through normal waiting, imports static bytes and preserves SDK/locale storage', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  host.state.directory = '.cache/installable-offline-shell/legacy-069dbc50';
+  try {
+    await prepared(page, host.origin);
+    await expect(page.locator('html')).toHaveAttribute('data-synthetic-version', 'legacy-069dbc50');
+    const legacyNames = await page.evaluate(async () => {
+      localStorage.setItem('spendspacey.locale', 'pt-BR');
+      localStorage.setItem('sdk-storage-sentinel', 'preserved');
+      return caches.keys();
+    });
+    host.state.directory = 'dist';
+    await page.evaluate(async () => {
+      await (await navigator.serviceWorker.getRegistration())!.update();
+    });
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const r = await navigator.serviceWorker.getRegistration();
+            return r?.waiting?.state;
+          }),
+        { timeout: 20000 },
+      )
+      .toBe('installed');
+    await expect(page.locator('html')).toHaveAttribute('data-synthetic-version', 'legacy-069dbc50');
+    const cutover = await records(page);
+    expect(cutover.some((r) => r.body.kind === 'cutover')).toBe(true);
+    expect(cutover.some((r) => r.body.kind === 'reserve' && r.body.purpose === 'import')).toBe(
+      true,
+    );
+    const fresh = await reopen(context, host.origin);
+    await expect(fresh.getByTestId('offline-readiness')).toContainText('pronta para uso offline');
+    for (const name of legacyNames)
+      expect(await fresh.evaluate((name) => caches.has(name), name)).toBe(true);
+    expect(await fresh.evaluate(() => localStorage.getItem('sdk-storage-sentinel'))).toBe(
+      'preserved',
+    );
+    await setOffline(context, true);
+    const cdp = await context.newCDPSession(fresh);
+    await cdp.send('ServiceWorker.enable');
+    await cdp.send('ServiceWorker.stopAllWorkers');
+    await fresh.reload();
+    await expect(fresh.getByTestId('offline-readiness')).toContainText('pronta para uso offline');
   } finally {
     await setOffline(context, false);
     await host.close();

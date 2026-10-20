@@ -1,28 +1,35 @@
 import {
   META,
   LOCK,
+  PROTOCOL,
+  HEX,
+  UUID,
   canonical,
   digest,
   boundedBytes,
-  validateBody,
-  validateDescriptor,
   validResource,
+  generation,
   resourceName,
   metadataURL,
-  HEX,
-  UUID,
+  validateBody,
+  browserID,
   type Entry,
   type Descriptor,
-  type RecordBody,
+  type Op,
   type Stored,
   type Snapshot,
-  type Reservation,
-  type Completion,
-  type Selection,
-  type Attempt,
-  type Finish,
+  type RecordBody,
 } from './schema';
+import {
+  validateDescriptor,
+  META as OLD_META,
+  resourceName as oldResourceName,
+  type Completion as OldCompletion,
+  type Reservation as OldReservation,
+} from './legacy-schema';
+import { legacySnapshot } from './legacy';
 import { routeRequest } from './policy';
+import { recoveryDocument } from './recovery';
 
 export interface GenerationHost {
   origin: string;
@@ -38,50 +45,71 @@ export interface WorkerInventory extends Entry {
   worker: string;
   implementation: string;
   compatibility: string;
+  legacyCompatibility: string;
 }
 export interface StaticStatus {
-  prepared?: boolean;
+  authority: 'recovery' | 'application' | 'none';
+  prepared: boolean;
   ready: boolean;
   pending: boolean;
   worker: string;
+  epoch: string | null;
+  binding: string | null;
   generation: string | null;
-  repair: 'idle' | 'complete' | 'failed' | 'cancelled' | 'busy' | 'offline' | 'blocked';
+  repair:
+    | 'idle'
+    | 'complete'
+    | 'failed'
+    | 'timed-out'
+    | 'cancelled'
+    | 'busy'
+    | 'offline'
+    | 'blocked'
+    | 'unknown'
+    | 'spent'
+    | 'unavailable';
 }
+type Reserve = Extract<RecordBody, { kind: 'reserve' }>;
+type Deliver = Extract<RecordBody, { kind: 'deliver' }>;
+type Attempt = Extract<RecordBody, { kind: 'attempt' }>;
+const repairLock = LOCK + '-repair';
 
-// The only discovery source is META. Resource caches are addressed exclusively
-// through validated reservations/completions; prefixes/iteration order are not lineage.
+// Every mutation uses the same origin-wide Web Lock, including install/cutover,
+// staging, selection, document ownership, evidence, and deletion seals. No local fallback.
 export class Generations {
-  private initialization?: Promise<void>;
-  private local = Promise.resolve();
-  private selected: string | null = null;
-  private selection: Stored | null = null;
-  private failed = false;
-  private controllers = new Map<string, AbortController>();
   readonly worker: string;
   readonly implementation: string;
   readonly compatibility: string;
+  readonly legacyCompatibility: string;
   readonly entries: Entry[];
   descriptor!: Descriptor;
+  private initialized?: Promise<void>;
+  private unavailable = false;
+  private sawLedger = false;
+  private epoch: string | null = null;
+  private startupEpoch: string | null = null;
+  private controllers = new Map<string, AbortController>();
   constructor(
     readonly host: GenerationHost,
     inventory: WorkerInventory[],
   ) {
+    const first = inventory[0];
     if (
-      !inventory.length ||
-      inventory.some(
-        (entry) =>
-          entry.worker !== inventory[0].worker ||
-          entry.implementation !== inventory[0].implementation ||
-          entry.compatibility !== inventory[0].compatibility,
+      !first ||
+      inventory.some((e) =>
+        ['worker', 'implementation', 'compatibility', 'legacyCompatibility'].some(
+          (k) => e[k as keyof WorkerInventory] !== first[k as keyof WorkerInventory],
+        ),
       ) ||
-      !HEX.test(inventory[0].worker) ||
-      !HEX.test(inventory[0].implementation) ||
-      !HEX.test(inventory[0].compatibility)
+      [first.worker, first.implementation, first.compatibility, first.legacyCompatibility].some(
+        (v) => !HEX.test(v),
+      )
     )
       throw new Error('Invalid build inventory');
-    this.worker = inventory[0].worker;
-    this.implementation = inventory[0].implementation;
-    this.compatibility = inventory[0].compatibility;
+    this.worker = first.worker;
+    this.implementation = first.implementation;
+    this.compatibility = first.compatibility;
+    this.legacyCompatibility = first.legacyCompatibility;
     this.entries = inventory.map(({ url, key, revision, integrity, type, bytes }) => ({
       url,
       key,
@@ -91,712 +119,1386 @@ export class Generations {
       bytes,
     }));
   }
-  private base() {
-    return { schema: 2 as const, origin: this.host.origin, compatibility: this.compatibility };
+  private async run<T>(op: () => Promise<T>): Promise<T> {
+    if (!this.host.locks) return Promise.reject(new Error('Shared serialization unavailable'));
+    return await this.host.locks.request(LOCK, { mode: 'exclusive' }, op);
   }
-  private async run<T>(operation: () => Promise<T>, shared = false): Promise<T> {
-    if (this.host.locks)
-      return this.host.locks.request(LOCK, { mode: shared ? 'shared' : 'exclusive' }, operation);
-    const pending = this.local.then(operation);
-    this.local = pending.then(
-      () => {},
-      () => {},
-    );
-    return pending;
-  }
-  async initialize(): Promise<void> {
-    return (this.initialization ??= this.run(async () => {
+  initialize(): Promise<void> {
+    return (this.initialized ??= this.run(async () => {
       try {
         if (
           (await digest(
             canonical({
               entries: this.entries,
               compatibility: this.compatibility,
+              legacyCompatibility: this.legacyCompatibility,
               implementation: this.implementation,
             }),
           )) !== this.worker
         )
-          throw new Error('Worker identity binding');
-        const generation = await digest(
-          canonical({ entries: this.entries, compatibility: this.compatibility }),
-        );
+          throw new Error('Worker identity');
         this.descriptor = await validateDescriptor(
-          { ...this.base(), scope: '/', generation, entries: this.entries },
+          {
+            schema: 2,
+            origin: this.host.origin,
+            scope: '/',
+            compatibility: this.compatibility,
+            generation: await generation(this.entries, this.compatibility),
+            entries: this.entries,
+          },
           this.host.origin,
           this.compatibility,
         );
-        const snapshot = await this.snapshot();
-        if (snapshot.head && (snapshot.head.body as Selection).worker !== this.worker) {
-          this.failed = true;
-          return;
+        const s = await this.snapshot();
+        this.startupEpoch = s.epoch;
+        this.epoch = s.owner === this.worker ? s.epoch : null;
+        if ([...s.records.values()].some((r) => r.kind === 'cutover')) {
+          await this.legacyHistory(s);
+          if (s.owner === this.worker) await this.refreshLegacy(s);
         }
-        this.selection = snapshot.head;
-        this.selected = snapshot.head ? (snapshot.head.body as Selection).selected : null;
       } catch {
-        this.failed = true;
+        this.unavailable = true;
       }
+    }).catch(() => {
+      this.unavailable = true;
     }));
   }
-  private async put(body: RecordBody): Promise<string> {
-    await validateBody(body, this.host.origin, this.compatibility);
+  async snapshot(extra?: Stored): Promise<Snapshot> {
+    const names = await this.host.caches.keys();
+    if (names.some((n) => n.startsWith('spendspacey-static-ownership-v') && n !== META))
+      throw new Error('Unsupported ownership namespace');
+    if (this.sawLedger && !names.includes(META)) throw new Error('Ownership storage lost');
+    const records = new Map<string, RecordBody>();
+    if (names.includes(META)) {
+      const cache = await this.host.caches.open(META);
+      const requests = await cache.keys();
+      if (requests.length > 4096) throw new Error('Metadata bound exhausted');
+      let size = 0;
+      // Bound parallel I/O without weakening per-record or aggregate limits.
+      for (let offset = 0; offset < requests.length; offset += 8) {
+        const batch = await Promise.all(
+          requests.slice(offset, offset + 8).map(async (request) => {
+            const response = await cache.match(request);
+            if (!response || response.headers.get('content-type') !== 'application/json')
+              throw new Error('Invalid metadata response');
+            const bytes = await boundedBytes(response, 64 * 1024);
+            size += bytes.length;
+            if (size > 8 * 1024 * 1024) throw new Error('Metadata bytes exhausted');
+            const raw: unknown = JSON.parse(new TextDecoder().decode(bytes));
+            if (
+              !raw ||
+              typeof raw !== 'object' ||
+              Object.keys(raw).sort().join() !== 'body,id' ||
+              !('id' in raw) ||
+              !('body' in raw) ||
+              typeof raw.id !== 'string' ||
+              request.url !== metadataURL(this.host.origin, raw.id) ||
+              (await digest(canonical(raw.body))) !== raw.id
+            )
+              throw new Error('Metadata identity');
+            return [
+              raw.id,
+              await validateBody(
+                raw.body,
+                this.host.origin,
+                this.compatibility,
+                this.legacyCompatibility,
+              ),
+            ] as const;
+          }),
+        );
+        for (const [id, body] of batch) records.set(id, body);
+      }
+    }
+    if (this.sawLedger && !records.size) throw new Error('Ledger evicted');
+    if (records.size) this.sawLedger = true;
+    if (extra) records.set(extra.id, extra.body);
+    // Only one complete immutable lineage is authoritative; a mutable head is neither read nor written.
+    const children = new Map<string | null, Stored>();
+    for (const [id, body] of records) {
+      if (children.has(body.parent)) throw new Error('Ledger fork');
+      children.set(body.parent, { id, body });
+    }
+    const chain: Stored[] = [];
+    let cursor = children.get(null);
+    while (cursor) {
+      if (cursor.body.sequence !== chain.length || chain.length >= records.size)
+        throw new Error('Ledger sequence');
+      chain.push(cursor);
+      cursor = children.get(cursor.id);
+    }
+    if (chain.length !== records.size) throw new Error('Missing lineage');
+    const seen = new Map<string, RecordBody>();
+    const bindings = new Map<string, Stored>();
+    const sealed = new Set<string>();
+    const instances = new Set<string>();
+    const finished = new Set<string>();
+    const boundReservations = new Set<string>();
+    const abandoned = new Set<string>();
+    const requests = new Set<string>();
+    const selectedBefore = new Set<string>();
+    let selection: Stored | null = null,
+      epoch: string | null = null,
+      owner: string | null = null;
+    const ref = (id: string | null, kind: RecordBody['kind']) => {
+      const r = id ? seen.get(id) : null;
+      if (!r || r.kind !== kind) throw new Error('Missing reference');
+      return r;
+    };
+    const unsealed = (id: string | null) => {
+      if (id && sealed.has(id)) throw new Error('Sealed generation referenced');
+    };
+    for (const record of chain) {
+      const b = record.body;
+      if (b.epoch !== epoch) throw new Error('Stale writer epoch');
+      const waitingWrite =
+        (b.kind === 'reserve' && b.purpose === 'install') ||
+        (b.kind === 'complete' && (ref(b.reservation, 'reserve') as Reserve).purpose === 'install');
+      if (owner && b.worker !== owner && !waitingWrite && b.kind !== 'activate')
+        throw new Error('Stale writer');
+      if (b.kind === 'reserve') {
+        if (instances.has(b.instance)) throw new Error('Duplicate resource ownership');
+        instances.add(b.instance);
+        if (b.purpose !== 'import' && (b.producer !== b.worker || b.legacy))
+          throw new Error('Producer mismatch');
+        if (b.legacy !== (b.purpose === 'import')) throw new Error('Invalid import');
+        const identity = {
+          entries: b.descriptor.entries,
+          compatibility: b.descriptor.compatibility,
+          implementation: b.implementation,
+        };
+        if (
+          (await digest(
+            canonical(
+              b.legacy ? identity : { ...identity, legacyCompatibility: this.legacyCompatibility },
+            ),
+          )) !== b.producer
+        )
+          throw new Error('Build proof');
+        if (b.source && b.purpose !== 'import') {
+          ref(b.source, 'complete');
+          unsealed(b.source);
+        }
+        if (b.purpose === 'repair') {
+          const a = ref(b.attempt, 'attempt') as Attempt;
+          if (a.instance !== b.instance || a.worker !== b.worker)
+            throw new Error('Repair reservation');
+        } else if (b.attempt !== null) throw new Error('Unexpected attempt');
+        if (
+          b.purpose === 'import' &&
+          !chain
+            .slice(0, b.sequence)
+            .some((r) => r.body.kind === 'cutover' && r.body.protected.includes(b.source!))
+        )
+          throw new Error('Unvalidated import');
+      }
+      if (b.kind === 'complete') {
+        const r = ref(b.reservation, 'reserve') as Reserve;
+        if (
+          r.worker !== b.worker ||
+          [...seen.values()].some((v) => v.kind === 'complete' && v.reservation === b.reservation)
+        )
+          throw new Error('Completion ownership');
+        if (
+          r.purpose === 'import' &&
+          [...seen.values()].some((v) => v.kind === 'cutover' && v.eligible.includes(r.source!))
+        )
+          selectedBefore.add(record.id);
+      }
+      if (b.kind === 'activate') {
+        const r = ref(b.installation, 'reserve') as Reserve;
+        if (
+          r.worker !== b.worker ||
+          r.purpose !== 'install' ||
+          r.epoch !== epoch ||
+          b.nextEpoch === epoch
+        )
+          throw new Error('Activation fence');
+        for (const id of [b.selected, b.fallback])
+          if (id) {
+            ref(id, 'complete');
+            unsealed(id);
+          }
+        if (b.selected === b.fallback && b.selected) throw new Error('Duplicate selection');
+        if (b.fallback && !selectedBefore.has(b.fallback))
+          throw new Error('Never selected fallback');
+        if (b.selected) {
+          const c = ref(b.selected, 'complete') as Extract<RecordBody, { kind: 'complete' }>;
+          const r = ref(c.reservation, 'reserve') as Reserve;
+          if (
+            !selectedBefore.has(b.selected) &&
+            r.purpose !== 'import' &&
+            c.reservation !== b.installation
+          )
+            throw new Error('Ineligible activation');
+          selectedBefore.add(b.selected);
+        }
+        epoch = b.nextEpoch;
+        owner = b.worker;
+        selection = record;
+      }
+      if (b.kind === 'navigation') {
+        if (
+          !owner ||
+          bindings.has(b.client) ||
+          [...seen.values()].some(
+            (v) =>
+              v.kind === 'navigation' && (v.client === b.client || v.navigation === b.navigation),
+          )
+        )
+          throw new Error('Duplicate browser ownership');
+        for (const id of b.references) {
+          ref(id, 'complete');
+          unsealed(id);
+        }
+      }
+      if (b.kind === 'deliver') {
+        const n = ref(b.reservation, 'navigation') as Extract<RecordBody, { kind: 'navigation' }>;
+        if (
+          n.client !== b.client ||
+          abandoned.has(b.reservation) ||
+          boundReservations.has(b.reservation) ||
+          bindings.has(b.client) ||
+          b.selection !== selection?.id
+        )
+          throw new Error('Binding fence');
+        for (const id of [b.generation, b.selected, b.fallback])
+          if (id) {
+            ref(id, 'complete');
+            unsealed(id);
+          }
+        if (b.selected === b.fallback && b.selected) throw new Error('Duplicate fallback');
+        const previous = selection?.body;
+        if (!previous || (previous.kind !== 'activate' && previous.kind !== 'deliver'))
+          throw new Error('Missing selection');
+        const changed = b.selected !== previous.selected || b.fallback !== previous.fallback;
+        if (n.mode === 'callback' && (b.recovery || changed || b.adoption))
+          throw new Error('Callback promotion');
+        if (b.generation && !n.references.includes(b.generation))
+          throw new Error('Unreserved delivery');
+        if (b.recoveryRequest) {
+          ref(b.recoveryRequest, 'recovery-request');
+          if (
+            !b.recovery ||
+            [...seen.values()].some(
+              (v) => v.kind === 'deliver' && v.recoveryRequest === b.recoveryRequest,
+            )
+          )
+            throw new Error('Recovery request consumed');
+        }
+        if (changed) {
+          if (!b.selected || b.generation !== b.selected || b.recovery)
+            throw new Error('Invalid joint selection');
+          if (b.adoption) {
+            const f = ref(b.adoption, 'finish') as Extract<RecordBody, { kind: 'finish' }>;
+            const a = ref(f.attempt, 'attempt') as Attempt;
+            if (f.outcome !== 'complete' || f.completion !== b.selected || a.base !== selection.id)
+              throw new Error('Invalid repair adoption');
+          } else if (!selectedBefore.has(b.selected) || b.selected !== previous.fallback)
+            throw new Error('Unknown rollback');
+          if (b.fallback && !selectedBefore.has(b.fallback)) throw new Error('Unknown fallback');
+          selection = record;
+          selectedBefore.add(b.selected);
+        } else if (b.adoption !== null) throw new Error('Spurious adoption');
+        bindings.set(b.client, record);
+        boundReservations.add(b.reservation);
+      }
+      if (b.kind === 'abandon') {
+        ref(b.reservation, 'navigation');
+        if (boundReservations.has(b.reservation) || abandoned.has(b.reservation))
+          throw new Error('Cannot abandon delivery');
+        abandoned.add(b.reservation);
+      }
+      if (b.kind === 'recovery-request') {
+        const d = ref(b.binding, 'deliver') as Deliver;
+        const n = ref(d.reservation, 'navigation') as Extract<RecordBody, { kind: 'navigation' }>;
+        if (d.recovery || n.mode !== 'shell' || requests.has(b.request))
+          throw new Error('Invalid recovery request');
+        requests.add(b.request);
+      }
+      if (b.kind === 'cancel') {
+        const a = ref(b.attempt, 'attempt') as Attempt;
+        if (a.binding !== b.binding || requests.has(b.request))
+          throw new Error('Invalid cancellation');
+        ref(b.binding, 'deliver');
+        requests.add(b.request);
+      }
+      if (b.kind === 'confirm' || b.kind === 'evidence') {
+        ref(b.binding, 'deliver');
+        if (b.kind === 'confirm' && requests.has(b.request)) throw new Error('Replayed evidence');
+        if (b.kind === 'confirm') requests.add(b.request);
+      }
+      if (b.kind === 'attempt') {
+        const d = ref(b.binding, 'deliver') as Deliver;
+        if (
+          !d.recovery ||
+          b.base !== selection?.id ||
+          requests.has(b.request) ||
+          instances.has(b.instance)
+        )
+          throw new Error('Repair boundary');
+        requests.add(b.request);
+        if (b.source) {
+          ref(b.source, 'complete');
+          unsealed(b.source);
+        }
+      }
+      if (b.kind === 'finish') {
+        ref(b.attempt, 'attempt');
+        if (finished.has(b.attempt)) throw new Error('Duplicate outcome');
+        finished.add(b.attempt);
+        if (b.completion) {
+          const c = ref(b.completion, 'complete') as Extract<RecordBody, { kind: 'complete' }>;
+          const r = ref(c.reservation, 'reserve') as Reserve;
+          if (r.attempt !== b.attempt) throw new Error('Outcome binding');
+        }
+      }
+      if (b.kind === 'cutover') {
+        if (owner || [...seen.values()].some((v) => v.kind === 'cutover'))
+          throw new Error('Duplicate cutover');
+        for (const a of b.attempts) {
+          if (requests.has(a.request)) throw new Error('Conflicting history');
+          requests.add(a.request);
+        }
+      }
+      if (b.kind === 'legacy-update') {
+        ref(b.cutover, 'cutover');
+        const previous = [...seen.values()]
+          .filter((v) => v.kind === 'cutover' || v.kind === 'legacy-update')
+          .at(-1)!;
+        if (previous.kind !== 'cutover' && previous.kind !== 'legacy-update')
+          throw new Error('Missing cutover history');
+        for (const old of previous.attempts)
+          if (!b.attempts.some((a) => a.request === old.request))
+            throw new Error('Lost spent attempt');
+        for (const a of b.attempts) {
+          if (requests.has(a.request) && !previous.attempts.some((p) => p.request === a.request))
+            throw new Error('Conflicting imported request');
+          requests.add(a.request);
+        }
+      }
+      if (b.kind === 'seal') {
+        // Recompute protection from durable evidence, not a caller's cleanup claim.
+        const protectedSet = this.protected(seen, selection, bindings);
+        for (const id of b.generations) {
+          ref(id, 'complete');
+          if (sealed.has(id) || protectedSet.has(id)) throw new Error('Unsafe deletion seal');
+          sealed.add(id);
+        }
+      }
+      if (b.kind === 'deleted') ref(b.seal, 'seal');
+      seen.set(record.id, b);
+    }
+    return {
+      records: new Map(chain.map(({ id, body }) => [id, body])),
+      chain,
+      head: chain.at(-1) ?? null,
+      selection,
+      epoch,
+      owner,
+      bindings,
+      sealed,
+    };
+  }
+  private protected(
+    records: Map<string, RecordBody>,
+    selection: Stored | null,
+    bindings: Map<string, Stored>,
+  ) {
+    const p = new Set<string>();
+    const selected = selection?.body;
+    if (selected && (selected.kind === 'activate' || selected.kind === 'deliver'))
+      for (const id of [selected.selected, selected.fallback]) if (id) p.add(id);
+    // A possibly delivered document is never retired by absence or a timeout.
+    for (const d of bindings.values())
+      if (d.body.kind === 'deliver' && d.body.generation) p.add(d.body.generation);
+    const completed = new Set(
+      [...records.values()].filter((v) => v.kind === 'complete').map((v) => v.reservation),
+    );
+    const abandoned = new Set(
+      [...records.values()].filter((v) => v.kind === 'abandon').map((v) => v.reservation),
+    );
+    const delivered = new Set(
+      [...records.values()].filter((v) => v.kind === 'deliver').map((v) => v.reservation),
+    );
+    for (const [id, b] of records) {
+      if (b.kind === 'navigation' && !abandoned.has(id) && !delivered.has(id))
+        b.references.forEach((v) => p.add(v));
+      if (b.kind === 'reserve' && !completed.has(id) && b.source && !b.legacy) p.add(b.source);
+      if (
+        b.kind === 'attempt' &&
+        ![...records.values()].some((v) => v.kind === 'finish' && v.attempt === id) &&
+        b.source
+      )
+        p.add(b.source);
+      if (
+        b.kind === 'finish' &&
+        b.outcome === 'complete' &&
+        b.completion &&
+        ![...records.values()].some((v) => v.kind === 'deliver' && v.adoption === id)
+      )
+        p.add(b.completion);
+      // A never-activated installation remains protected (another worker may be waiting).
+      if (b.kind === 'complete') {
+        const r = records.get(b.reservation);
+        if (
+          r?.kind === 'reserve' &&
+          r.purpose === 'install' &&
+          ![...records.values()].some(
+            (v) => v.kind === 'activate' && v.installation === b.reservation,
+          )
+        )
+          p.add(id);
+      }
+    }
+    return p;
+  }
+  private async append(s: Snapshot, op: Op, installing = false): Promise<Stored> {
+    if (this.unavailable) throw new Error('Unavailable ledger');
+    if (!installing && (s.owner !== this.worker || s.epoch !== this.epoch))
+      throw new Error('Writer fenced');
+    const now = await this.snapshot();
+    if (now.head?.id !== s.head?.id || now.epoch !== s.epoch) throw new Error('Head changed');
+    if (now.records.size >= 4096) throw new Error('Metadata exhausted');
+    const body: RecordBody = {
+      ...op,
+      schema: 3,
+      origin: this.host.origin,
+      compatibility: this.compatibility,
+      worker: this.worker,
+      epoch: s.epoch,
+      parent: s.head?.id ?? null,
+      sequence: s.chain.length,
+    };
+    await validateBody(body, this.host.origin, this.compatibility, this.legacyCompatibility);
     const id = await digest(canonical(body));
+    const record = { id, body };
+    await this.snapshot(record); // Validate the proposed transition before writing untrusted input.
     const cache = await this.host.caches.open(META);
     await cache.put(
       metadataURL(this.host.origin, id),
-      new Response(canonical({ id, body }), { headers: { 'content-type': 'application/json' } }),
+      new Response(canonical(record), { headers: { 'content-type': 'application/json' } }),
     );
-    return id;
+    const read = await cache.match(metadataURL(this.host.origin, id));
+    if (!read || (await read.text()) !== canonical(record))
+      throw new Error('Commit read-back failed');
+    const restored = await this.snapshot();
+    if (restored.head?.id !== id) throw new Error('Commit lineage failed');
+    this.sawLedger = true;
+    return record;
   }
-  async snapshot(): Promise<Snapshot> {
-    const records = new Map<string, RecordBody>();
-    if (!(await this.host.caches.has(META))) return { records, chain: [], head: null };
-    const cache = await this.host.caches.open(META);
-    const requests = await cache.keys();
-    if (requests.length > 1024) throw new Error('Metadata limit');
-    for (const request of requests) {
-      const response = await cache.match(request);
-      if (!response || response.headers.get('content-type') !== 'application/json')
-        throw new Error('Invalid metadata response');
-      const raw: unknown = JSON.parse(
-        new TextDecoder().decode(await boundedBytes(response, 64 * 1024)),
-      );
-      if (
-        !raw ||
-        typeof raw !== 'object' ||
-        Object.keys(raw).sort().join() !== 'body,id' ||
-        !('id' in raw) ||
-        !('body' in raw) ||
-        typeof raw.id !== 'string' ||
-        !HEX.test(raw.id) ||
-        request.url !== metadataURL(this.host.origin, raw.id) ||
-        (await digest(canonical(raw.body))) !== raw.id
-      )
-        throw new Error('Metadata binding');
-      records.set(raw.id, await validateBody(raw.body, this.host.origin, this.compatibility));
-    }
-    const referenced = new Set<string>();
-    const selections: Stored[] = [];
-    const requestsSeen = new Set<string>();
-    const installs = new Map<string, string[]>();
-    for (const [id, body] of records) {
-      if (body.kind === 'reserve') {
-        if (body.base && records.get(body.base)?.kind !== 'select')
-          throw new Error('Reservation selection boundary');
-        if (body.worker === this.worker && body.generation !== this.descriptor.generation)
-          throw new Error('Worker build binding');
-        if (body.previous) {
-          const previous = records.get(body.previous);
-          if (
-            previous?.kind !== 'reserve' ||
-            previous.worker !== body.worker ||
-            previous.purpose !== 'install' ||
-            body.purpose !== 'install'
-          )
-            throw new Error('Installation lineage');
-        }
-        if (body.purpose === 'repair') {
-          const attempt = body.attempt && records.get(body.attempt);
-          if (
-            !attempt ||
-            attempt.kind !== 'attempt' ||
-            attempt.worker !== body.worker ||
-            attempt.instance !== body.instance ||
-            attempt.generation !== body.generation ||
-            attempt.base !== body.base
-          )
-            throw new Error('Repair reservation');
-        } else {
-          if (body.attempt !== null) throw new Error('Invalid install');
-          const list = installs.get(body.worker) ?? [];
-          list.push(id);
-          installs.set(body.worker, list);
-        }
-      }
-      if (body.kind === 'complete') {
-        const r = records.get(body.reservation);
-        if (r?.kind !== 'reserve' || r.generation !== body.descriptor.generation)
-          throw new Error('Completion binding');
-        if (
-          (await digest(
-            canonical({
-              entries: body.descriptor.entries,
-              compatibility: body.compatibility,
-              implementation: r.implementation,
-            }),
-          )) !== r.worker
-        )
-          throw new Error('Completion worker binding');
-      }
-      if (body.kind === 'select') {
-        if (body.reason === 'activate') {
-          const installation = body.installation && records.get(body.installation);
-          if (
-            !installation ||
-            installation.kind !== 'reserve' ||
-            installation.purpose !== 'install' ||
-            installation.worker !== body.worker ||
-            installation.base !== body.parent
-          )
-            throw new Error('Activation boundary');
-        } else if (body.installation !== null) throw new Error('Unexpected installation');
-        selections.push({ id, body });
-        if (body.parent) {
-          const parent = records.get(body.parent);
-          if (parent?.kind !== 'select' || body.sequence !== parent.sequence + 1)
-            throw new Error('Selection lineage');
-          referenced.add(body.parent);
-          if (
-            body.reason !== 'activate' &&
-            (parent.worker !== body.worker || parent.era !== body.era)
-          )
-            throw new Error('Stale owner');
-        } else if (body.sequence !== 0 || body.reason !== 'activate')
-          throw new Error('Invalid root');
-        for (const ref of [body.selected, body.fallback])
-          if (ref && records.get(ref)?.kind !== 'complete') throw new Error('Missing completion');
-        if (body.selected && body.selected === body.fallback) throw new Error('Duplicate fallback');
-      }
-      if (body.kind === 'attempt') {
-        if (requestsSeen.has(body.request) || records.get(body.base)?.kind !== 'select')
-          throw new Error('Attempt boundary');
-        requestsSeen.add(body.request);
-        if (body.source && records.get(body.source)?.kind !== 'complete')
-          throw new Error('Invalid repair source');
-        const base = records.get(body.base) as Selection;
-        if (base.worker !== body.worker || base.era !== body.era)
-          throw new Error('Attempt ownership');
-      }
-      if (body.kind === 'finish') {
-        const attempt = records.get(body.attempt);
-        if (attempt?.kind !== 'attempt') throw new Error('Missing attempt');
-        if (body.completion) {
-          const c = records.get(body.completion);
-          const r = c?.kind === 'complete' ? records.get(c.reservation) : undefined;
-          if (
-            c?.kind !== 'complete' ||
-            r?.kind !== 'reserve' ||
-            r.attempt !== body.attempt ||
-            r.generation !== attempt.generation
-          )
-            throw new Error('Repair completion binding');
-        }
-      }
-    }
-    for (const list of installs.values()) {
-      const used = new Set(list.map((id) => (records.get(id) as Reservation).previous));
-      if (list.filter((id) => !used.has(id)).length !== 1)
-        throw new Error('Ambiguous installation');
-    }
-    const tips = selections.filter((record) => !referenced.has(record.id));
-    if (selections.length && tips.length !== 1) throw new Error('Ambiguous selection');
-    const chain: Stored[] = [];
-    let cursor: Stored | null = tips[0] ?? null;
-    const seen = new Set<string>();
-    while (cursor) {
-      if (seen.has(cursor.id)) throw new Error('Cycle');
-      seen.add(cursor.id);
-      chain.unshift(cursor);
-      const parent: string | null = (cursor.body as Selection).parent;
-      cursor = parent ? { id: parent, body: records.get(parent)! } : null;
-    }
-    if (chain.length !== selections.length) throw new Error('Disconnected selection');
-    const eligible = new Set<string>();
-    const finishedAttempts = new Set<string>();
-    for (const body of records.values())
-      if (body.kind === 'finish') {
-        if (finishedAttempts.has(body.attempt)) throw new Error('Contradictory repair outcome');
-        finishedAttempts.add(body.attempt);
-      }
-    const instances = new Set<string>();
-    for (const body of records.values())
-      if (body.kind === 'reserve') {
-        if (instances.has(body.instance)) throw new Error('Conflicting ownership');
-        instances.add(body.instance);
-      }
-    for (const record of chain) {
-      const body = record.body as Selection;
-      if (body.fallback && !eligible.has(body.fallback)) throw new Error('Never-selected fallback');
-      if (body.selected) {
-        const completion = records.get(body.selected) as Completion;
-        const reservation = records.get(completion.reservation) as Reservation;
-        if (!eligible.has(body.selected)) {
-          if (reservation.worker !== body.worker) throw new Error('Selection producer mismatch');
-          if (body.reason === 'activate' && reservation.purpose !== 'install')
-            throw new Error('Unselected staging');
-          if (
-            body.reason === 'repair' &&
-            ![...records.values()].some(
-              (r) =>
-                r.kind === 'finish' &&
-                r.outcome === 'complete' &&
-                r.completion === body.selected &&
-                (records.get(r.attempt) as Attempt).base === body.parent,
-            )
-          )
-            throw new Error('Uncommitted repair');
-          if (body.reason === 'recover') throw new Error('Unknown rollback');
-        }
-        eligible.add(body.selected);
-      }
-    }
-    return { records, chain, head: tips[0] ?? null };
+  private resource(s: Snapshot, id: string) {
+    const c = s.records.get(id);
+    if (c?.kind !== 'complete' || s.sealed.has(id)) throw new Error('Unknown or sealed generation');
+    const r = s.records.get(c.reservation);
+    if (r?.kind !== 'reserve') throw new Error('Missing resource owner');
+    return r;
   }
-  private completion(
-    snapshot: Snapshot,
-    id: string,
-  ): { completion: Completion; reservation: Reservation } {
-    const completion = snapshot.records.get(id);
-    if (completion?.kind !== 'complete') throw new Error('Unknown completion');
-    const reservation = snapshot.records.get(completion.reservation);
-    if (reservation?.kind !== 'reserve') throw new Error('Unknown owner');
-    return { completion, reservation };
-  }
-  async verify(snapshot: Snapshot, id: string | null): Promise<boolean> {
-    if (!id) return false;
+  async verify(s: Snapshot, id: string | null): Promise<boolean> {
     try {
-      const { completion, reservation } = this.completion(snapshot, id);
-      const name = resourceName(reservation);
+      if (!id) return false;
+      const r = this.resource(s, id),
+        name = resourceName(r);
       if (!(await this.host.caches.has(name))) return false;
-      const cache = await this.host.caches.open(name);
-      const expected = completion.descriptor.entries;
-      const actual = await cache.keys();
+      const cache = await this.host.caches.open(name),
+        actual = await cache.keys();
       if (
-        actual.length !== expected.length ||
-        actual.some((r) => !expected.some((e) => r.url === this.host.origin + e.key))
+        actual.length !== r.descriptor.entries.length ||
+        actual.some((v) => !r.descriptor.entries.some((e) => this.host.origin + e.key === v.url))
       )
         return false;
-      for (const entry of expected) {
-        const response = await cache.match(this.host.origin + entry.key);
-        if (!response || !(await validResource(entry, response, this.host.origin))) return false;
-      }
+      const verified = await Promise.all(
+        r.descriptor.entries.map(async (entry) => {
+          const response = await cache.match(this.host.origin + entry.key);
+          return !!response && (await validResource(entry, response, this.host.origin));
+        }),
+      );
+      if (!verified.every(Boolean)) return false;
       return true;
     } catch {
       return false;
     }
   }
+  private async exact(s: Snapshot, id: string, path: string): Promise<Response> {
+    const r = this.resource(s, id);
+    const e = r.descriptor.entries.find((v) => v.url === path);
+    if (!e) throw new Error('Not in document inventory');
+    const response = await (
+      await this.host.caches.open(resourceName(r))
+    ).match(this.host.origin + e.key);
+    if (!response || !(await validResource(e, response, this.host.origin)))
+      throw new Error('Unverified response');
+    // Return independently verified, captured bytes, not a later mutable Cache lookup.
+    return new Response((await boundedBytes(response, e.bytes)) as Uint8Array<ArrayBuffer>, {
+      status: 200,
+      headers: response.headers,
+    });
+  }
   private async fill(
-    descriptor: Descriptor,
-    reservation: Reservation,
+    r: Reserve,
     signal?: AbortSignal,
-    source?: { snapshot: Snapshot; id: string },
+    source?: { cache: Cache; descriptor: Descriptor },
   ) {
-    const target = await this.host.caches.open(resourceName(reservation));
-    const sourceCache = source
-      ? await this.host.caches.open(
-          resourceName(this.completion(source.snapshot, source.id).reservation),
-        )
-      : null;
-    for (const entry of descriptor.entries) {
+    const target = await this.host.caches.open(resourceName(r));
+    for (const entry of r.descriptor.entries) {
       signal?.throwIfAborted();
-      let response = await sourceCache?.match(this.host.origin + entry.key);
-      if (!response || !(await validResource(entry, response, this.host.origin)))
+      let response =
+        source && source.descriptor.entries.some((e) => canonical(e) === canonical(entry))
+          ? await source.cache.match(this.host.origin + entry.key)
+          : undefined;
+      if (response && !(await validResource(entry, response, this.host.origin)))
+        response = undefined;
+      if (!response)
         response = await this.host.fetch(
           new Request(this.host.origin + entry.url, {
+            method: 'GET',
             credentials: 'omit',
             redirect: 'error',
-            cache: 'reload',
+            cache: 'no-store',
             integrity: entry.integrity,
             signal,
           }),
         );
-      signal?.throwIfAborted();
-      if (response.url && response.url !== this.host.origin + entry.url)
-        throw new Error('Unexpected response URL');
       if (!(await validResource(entry, response, this.host.origin)))
-        throw new Error('Invalid static resource');
-      await target.put(this.host.origin + entry.key, response);
-    }
-  }
-  private async complete(reservation: string, descriptor: Descriptor) {
-    const body: Completion = { ...this.base(), kind: 'complete', reservation, descriptor };
-    const id = await digest(canonical(body));
-    const snapshot = await this.snapshot();
-    snapshot.records.set(id, body);
-    if (!(await this.verify(snapshot, id))) throw new Error('Incomplete resources');
-    return this.put(body);
-  }
-  async install() {
-    await this.initialize();
-    const { reservation, ref } = await this.run(async () => {
-      const snapshot = await this.snapshot();
-      const previous = [...snapshot.records].filter(
-        ([, r]) => r.kind === 'reserve' && r.worker === this.worker && r.purpose === 'install',
-      );
-      const parents = new Set(previous.map(([, r]) => (r as Reservation).previous));
-      const tip = previous.find(([id]) => !parents.has(id));
-      const reservation: Reservation = {
-        ...this.base(),
-        kind: 'reserve',
-        worker: this.worker,
-        implementation: this.implementation,
-        instance: crypto.randomUUID(),
-        generation: this.descriptor.generation,
-        purpose: 'install',
-        previous: tip?.[0] ?? null,
-        base: snapshot.head?.id ?? null,
-        attempt: null,
-      };
-      return { reservation, ref: await this.put(reservation) };
-    });
-    // The immutable reservation protects these resources across workers. Do not
-    // hold the selection lock over network I/O and block the old offline shell.
-    await this.fill(this.descriptor, reservation);
-    await this.run(async () => {
-      const id = await this.complete(ref, this.descriptor);
-      if (!(await this.verify(await this.snapshot(), id)))
-        throw new Error('Incomplete installation');
-    });
-  }
-  private candidate(snapshot: Snapshot): string | null {
-    const installations = [...snapshot.records].filter(
-      ([, r]) => r.kind === 'reserve' && r.worker === this.worker && r.purpose === 'install',
-    );
-    const parents = new Set(installations.map(([, r]) => (r as Reservation).previous));
-    const tip = installations.find(([id]) => !parents.has(id));
-    const matches = [...snapshot.records].filter(
-      ([, r]) => r.kind === 'complete' && r.reservation === tip?.[0],
-    );
-    if (matches.length > 1) throw new Error('Ambiguous completion');
-    return matches[0]?.[0] ?? null;
-  }
-  private async commit(
-    snapshot: Snapshot,
-    selected: string | null,
-    fallback: string | null,
-    reason: 'activate' | 'repair' | 'recover',
-    era: string,
-    installation: string | null = null,
-  ) {
-    const body: Selection = {
-      ...this.base(),
-      kind: 'select',
-      parent: snapshot.head?.id ?? null,
-      sequence: snapshot.head ? (snapshot.head.body as Selection).sequence + 1 : 0,
-      worker: this.worker,
-      era,
-      selected,
-      fallback,
-      reason,
-      installation,
-    };
-    const id = await this.put(body);
-    this.selection = { id, body };
-    this.selected = selected;
-    this.failed = false;
-  }
-  async activate() {
-    await this.initialize();
-    return this.run(async () => {
-      const snapshot = await this.snapshot();
-      const previous = snapshot.head?.body as Selection | undefined;
-      const own = this.candidate(snapshot);
-      const reservation = own ? this.completion(snapshot, own).reservation : null;
-      const installation = own ? (snapshot.records.get(own) as Completion).reservation : null;
-      // An activation ticket is bound to the selection observed at reservation.
-      // A stale worker cannot append over a newer era; a genuine rollback has a
-      // newly reserved installation bound to that newer era.
-      if (!reservation || reservation.base !== (snapshot.head?.id ?? null)) {
-        if (previous?.worker === this.worker && previous.installation === installation) return;
-        throw new Error('Stale activation');
-      }
-      let selected = previous?.selected ?? null;
-      let fallback = previous?.fallback ?? null;
-      if (await this.verify(snapshot, own)) {
-        selected = own;
-        fallback = (await this.verify(snapshot, previous?.selected ?? null))
-          ? previous!.selected
-          : (await this.verify(snapshot, previous?.fallback ?? null))
-            ? previous!.fallback
-            : null;
-      } else if (
-        !(await this.verify(snapshot, selected)) &&
-        (await this.verify(snapshot, fallback))
-      ) {
-        selected = fallback;
-        fallback = null;
-      }
-      if (fallback === selected) fallback = null;
-      await this.commit(
-        snapshot,
-        selected,
-        fallback,
-        'activate',
-        crypto.randomUUID(),
-        installation,
-      );
-    }).catch(() => {
-      this.failed = true;
-    });
-  }
-  private async promote(incoming: string) {
-    if (!this.host.locks || this.host.busy()) return;
-    const windows = await this.host.windows();
-    if (windows.some((client) => client.id !== incoming)) return;
-    const snapshot = await this.snapshot();
-    if (!this.selection || snapshot.head?.id !== this.selection.id) return;
-    const body = this.selection.body as Selection;
-    const finished = [...snapshot.records].filter(
-      ([, r]) =>
-        r.kind === 'finish' &&
-        r.outcome === 'complete' &&
-        r.completion &&
-        (snapshot.records.get(r.attempt) as Attempt)?.base === snapshot.head!.id,
-    );
-    // Multiple explicit repairs must never create an ordering based on enumeration.
-    // Select only the single committed successful result for this base selection.
-    if (finished.length === 0) {
-      if (
-        !(await this.verify(snapshot, body.selected)) &&
-        (await this.verify(snapshot, body.fallback))
-      )
-        await this.commit(snapshot, body.fallback, null, 'recover', body.era);
-      return;
-    }
-    if (finished.length !== 1) return;
-    const complete = (finished[0][1] as Finish).completion!;
-    if (!(await this.verify(snapshot, complete))) return;
-    const fallback = (await this.verify(snapshot, body.selected))
-      ? body.selected
-      : (await this.verify(snapshot, body.fallback))
-        ? body.fallback
-        : null;
-    await this.commit(snapshot, complete, fallback, 'repair', body.era);
-  }
-  async status(): Promise<StaticStatus> {
-    await this.initialize();
-    return this.run(async () => {
-      try {
-        const snapshot = await this.snapshot();
-        if (this.failed)
-          return {
-            ...this.statusValue(false, false),
-            prepared: await this.verify(snapshot, this.candidate(snapshot)),
-          };
-        if (snapshot.head?.id !== this.selection?.id) return this.statusValue(false, false);
-        const ready = await this.verify(snapshot, this.selected);
-        const selected = this.selected
-          ? this.completion(snapshot, this.selected).completion.descriptor.generation
-          : null;
-        return {
-          ...this.statusValue(ready, selected !== this.descriptor.generation),
-          generation: selected,
-          prepared: await this.verify(snapshot, this.candidate(snapshot)),
-        };
-      } catch {
-        return this.statusValue(false, false);
-      }
-    }, true);
-  }
-  private statusValue(ready: boolean, pending: boolean): StaticStatus {
-    return { ready, pending, worker: this.worker, generation: this.selected, repair: 'idle' };
-  }
-  async respond(request: Request, incoming = '', replaces = ''): Promise<Response | undefined> {
-    await this.initialize();
-    const preliminary = routeRequest(
-      request,
-      this.host.origin,
-      new Set(this.entries.map((e) => this.host.origin + e.url)),
-    );
-    if (preliminary === 'network' && !new URL(request.url).pathname.startsWith('/assets/')) return;
-    if (
-      request.mode === 'navigate' &&
-      !replaces &&
-      new URL(request.url).pathname === '/' &&
-      !new URL(request.url).search
-    )
-      await this.run(() => this.promote(incoming)).catch(() => {});
-    return this.run(async () => {
-      if (this.failed || !this.selected)
-        return preliminary === 'network' ? undefined : Response.error();
-      try {
-        const snapshot = await this.snapshot();
-        if (snapshot.head?.id !== this.selection?.id) return Response.error();
-        const { completion, reservation } = this.completion(snapshot, this.selected);
-        const kind = routeRequest(
-          request,
-          this.host.origin,
-          new Set(completion.descriptor.entries.map((e) => this.host.origin + e.url)),
-        );
-        if (kind === 'network') return;
+        throw new Error('Static verification failed');
+      signal?.throwIfAborted();
+      const verified = response;
+      await this.run(async () => {
+        const s = await this.snapshot();
         if (
-          (kind === 'shell' || kind === 'callback') &&
-          !(await this.verify(snapshot, this.selected))
+          s.epoch !== r.epoch ||
+          ![...s.records.values()].some(
+            (v) => v.kind === 'reserve' && v.instance === r.instance && v.worker === this.worker,
+          )
         )
-          return Response.error();
-        const path = kind === 'static' ? new URL(request.url).pathname : '/';
-        const entry = completion.descriptor.entries.find((e) => e.url === path)!;
-        const response = await (
-          await this.host.caches.open(resourceName(reservation))
-        ).match(this.host.origin + entry.key);
-        if (!response || !(await validResource(entry, response, this.host.origin)))
-          return Response.error();
-        if (kind !== 'callback') return response;
-        const headers = new Headers(response.headers);
-        headers.set('Cache-Control', 'no-store');
-        headers.set('Referrer-Policy', 'no-referrer');
-        return new Response(response.body, { status: 200, headers });
+          throw new Error('Staging writer fenced');
+        signal?.throwIfAborted();
+        await target.put(this.host.origin + entry.key, verified);
+      });
+    }
+  }
+  private async complete(reservation: string, epoch: string | null, installing = false) {
+    return this.run(async () => {
+      const s = await this.snapshot(),
+        r = s.records.get(reservation);
+      if (s.epoch !== epoch || r?.kind !== 'reserve' || r.worker !== this.worker)
+        throw new Error('Staging fenced');
+      // Verify the complete exact inventory before publishing completion metadata.
+      const cache = await this.host.caches.open(resourceName(r));
+      const actual = await cache.keys();
+      if (actual.length !== r.descriptor.entries.length) throw new Error('Incomplete staging');
+      for (const e of r.descriptor.entries) {
+        const response = await cache.match(this.host.origin + e.key);
+        if (!response || !(await validResource(e, response, this.host.origin)))
+          throw new Error('Incomplete staging');
+      }
+      return this.append(s, { kind: 'complete', reservation }, installing);
+    });
+  }
+  private async legacyHistory(s: Snapshot) {
+    const cut = [...s.records].find(([, b]) => b.kind === 'cutover');
+    if (!cut) return null;
+    if (!(await this.host.caches.has(OLD_META))) throw new Error('Legacy evidence evicted');
+    const old = await legacySnapshot(this.host.caches, this.host.origin, this.legacyCompatibility);
+    const prior = [...s.records.values()]
+      .filter((b) => b.kind === 'cutover' || b.kind === 'legacy-update')
+      .at(-1)!;
+    if (prior.kind !== 'cutover' && prior.kind !== 'legacy-update')
+      throw new Error('Missing historical proof');
+    if (prior.legacyHead && !old.chain.some((r) => r.id === prior.legacyHead))
+      throw new Error('Legacy lineage changed');
+    const attempts = [...old.records]
+      .filter(([, r]) => r.kind === 'attempt')
+      .map(([id, a]) => {
+        const f = [...old.records.values()].find((r) => r.kind === 'finish' && r.attempt === id);
+        return {
+          request: (a as { request: string }).request,
+          outcome: f?.kind === 'finish' ? f.outcome : ('unknown' as const),
+        };
+      });
+    for (const a of prior.attempts) {
+      const current = attempts.find((v) => v.request === a.request);
+      if (!current || (a.outcome !== 'unknown' && a.outcome !== current.outcome))
+        throw new Error('Lost or contradictory legacy budget');
+    }
+    const eligible = new Set(
+      old.chain.map((r) => (r.body.kind === 'select' ? r.body.selected : null)),
+    );
+    if (
+      prior.eligible.some((id) => !eligible.has(id)) ||
+      prior.protected.some((id) => old.records.get(id)?.kind !== 'complete')
+    )
+      throw new Error('Lost legacy evidence');
+    return {
+      cutover: cut[0],
+      legacyHead: old.head?.id ?? null,
+      legacyDigest: await digest(canonical([...old.records].sort())),
+      attempts,
+      eligible: [
+        ...new Set(
+          old.chain
+            .map((r) => (r.body.kind === 'select' ? r.body.selected : null))
+            .filter((v): v is string => !!v),
+        ),
+      ],
+      protected: [...old.records].filter(([, r]) => r.kind === 'complete').map(([id]) => id),
+      prior,
+    };
+  }
+  private async refreshLegacy(s: Snapshot) {
+    const history = await this.legacyHistory(s);
+    if (history && history.legacyDigest !== history.prior.legacyDigest) {
+      const { prior: _, ...update } = history;
+      void _;
+      await this.append(s, { kind: 'legacy-update', ...update });
+      return this.snapshot();
+    }
+    return s;
+  }
+  private async cutover() {
+    if (!(await this.host.caches.has(OLD_META))) return;
+    const start = await this.run(async () => {
+      const s = await this.snapshot();
+      if (s.records.size) return null;
+      const old = await legacySnapshot(
+        this.host.caches,
+        this.host.origin,
+        this.legacyCompatibility,
+      );
+      const attempts = [...old.records.entries()]
+        .filter(([, r]) => r.kind === 'attempt')
+        .map(([id, a]) => {
+          const f = [...old.records.values()].find((r) => r.kind === 'finish' && r.attempt === id);
+          return {
+            request: (a as { request: string }).request,
+            outcome: f?.kind === 'finish' ? f.outcome : ('unknown' as const),
+          };
+        });
+      const refs = [...old.records.entries()]
+        .filter(([, r]) => r.kind === 'complete')
+        .map(([id]) => id);
+      await this.append(
+        s,
+        {
+          kind: 'cutover',
+          legacyHead: old.head?.id ?? null,
+          legacyDigest: await digest(canonical([...old.records].sort())),
+          attempts,
+          protected: refs,
+          eligible: [
+            ...new Set(
+              old.chain
+                .map((r) => (r.body.kind === 'select' ? r.body.selected : null))
+                .filter((v): v is string => !!v),
+            ),
+          ],
+        },
+        true,
+      );
+      return old;
+    });
+    if (!start) return;
+    const head = start.head?.body;
+    if (head?.kind !== 'select') return;
+    for (const source of [head.selected, head.fallback]) {
+      if (!source) continue;
+      const c = start.records.get(source) as OldCompletion;
+      const old = start.records.get(c.reservation) as OldReservation;
+      const reservation = await this.run(async () => {
+        const s = await this.snapshot();
+        return this.append(
+          s,
+          {
+            kind: 'reserve',
+            instance: crypto.randomUUID(),
+            purpose: 'import',
+            source,
+            attempt: null,
+            generation: c.descriptor.generation,
+            descriptor: c.descriptor,
+            producer: old.worker,
+            implementation: old.implementation,
+            legacy: true,
+          },
+          true,
+        );
+      });
+      const r = reservation.body as Reserve;
+      // Copy only previously validated legacy inventory; never repair import from network.
+      const oldCache = await this.host.caches.open(oldResourceName(old)),
+        target = await this.host.caches.open(resourceName(r));
+      try {
+        const actual = await oldCache.keys();
+        if (actual.length !== c.descriptor.entries.length)
+          throw new Error('Incomplete legacy generation');
+        for (const e of c.descriptor.entries) {
+          const response = await oldCache.match(this.host.origin + e.key);
+          if (!response || !(await validResource(e, response, this.host.origin)))
+            throw new Error('Unverified import');
+          await this.run(async () => {
+            const s = await this.snapshot();
+            if (s.epoch !== r.epoch) throw new Error('Import fenced');
+            await target.put(this.host.origin + e.key, response);
+          });
+        }
+        await this.complete(reservation.id, reservation.body.epoch, true);
+      } catch {
+        /* Interrupted or damaged import never creates usable completion. Legacy untouched. */
+      }
+    }
+  }
+  async install(): Promise<void> {
+    await this.initialize();
+    if (this.unavailable) throw new Error('Initialization unavailable');
+    await this.cutover();
+    const reservation = await this.run(async () => {
+      const s = await this.snapshot();
+      if (s.epoch !== this.startupEpoch) throw new Error('Installation epoch changed');
+      return this.append(
+        s,
+        {
+          kind: 'reserve',
+          instance: crypto.randomUUID(),
+          purpose: 'install',
+          generation: this.descriptor.generation,
+          source: null,
+          attempt: null,
+          descriptor: this.descriptor,
+          producer: this.worker,
+          implementation: this.implementation,
+          legacy: false,
+        },
+        true,
+      );
+    });
+    await this.fill(reservation.body as Reserve);
+    await this.complete(reservation.id, reservation.body.epoch, true);
+  }
+  async activate(): Promise<void> {
+    await this.initialize();
+    await this.run(async () => {
+      if (this.unavailable) throw new Error('Initialization unavailable');
+      const s = await this.snapshot();
+      const install = [...s.records]
+        .filter(
+          ([, r]) =>
+            r.kind === 'reserve' &&
+            r.purpose === 'install' &&
+            r.worker === this.worker &&
+            r.epoch === s.epoch,
+        )
+        .at(-1);
+      if (!install) throw new Error('No fenced installation');
+      const candidate =
+        [...s.records].find(
+          ([, r]) => r.kind === 'complete' && r.reservation === install[0],
+        )?.[0] ?? null;
+      const prior = s.selection?.body;
+      const previous =
+        prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.selected : null;
+      const rollback =
+        prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.fallback : null;
+      const imports = [...s.records]
+        .filter(
+          ([, r]) =>
+            r.kind === 'complete' && (s.records.get(r.reservation) as Reserve).purpose === 'import',
+        )
+        .map(([id]) => id);
+      let selected: string | null = null;
+      for (const id of [candidate, previous, rollback, ...imports])
+        if (await this.verify(s, id)) {
+          selected = id;
+          break;
+        }
+      let fallback: string | null = null;
+      for (const id of [previous, rollback, ...imports])
+        if (id !== selected && (await this.verify(s, id))) {
+          fallback = id;
+          break;
+        }
+      await this.legacyHistory(s);
+      const nextEpoch = crypto.randomUUID();
+      await this.append(
+        s,
+        { kind: 'activate', installation: install[0], selected, fallback, nextEpoch },
+        true,
+      );
+      this.epoch = nextEpoch;
+      await this.refreshLegacy(await this.snapshot());
+    });
+  }
+  private pending(s: Snapshot) {
+    return [...s.records]
+      .filter(
+        ([, b]) =>
+          b.kind === 'finish' &&
+          b.outcome === 'complete' &&
+          (s.records.get(b.attempt) as Attempt).base === s.selection?.id,
+      )
+      .at(-1);
+  }
+  // No client lookup or enumeration is required to authorize delivery. Browser-issued
+  // resultingClientId is reserved durably; all existing bindings remain immutable.
+  async respond(request: Request, incoming = '', client = ''): Promise<Response | undefined> {
+    await this.initialize();
+    const kind = routeRequest(request, this.host.origin, new Set([request.url]));
+    if (kind === 'network') return undefined;
+    if (kind === 'static') {
+      try {
+        return await this.run(async () => {
+          if (this.unavailable || !browserID(client)) return Response.error();
+          const s = await this.snapshot(),
+            b = s.bindings.get(client)?.body;
+          if (b?.kind !== 'deliver' || !b.generation || !(await this.verify(s, b.generation)))
+            return Response.error();
+          return this.exact(s, b.generation, new URL(request.url).pathname);
+        });
       } catch {
         return Response.error();
       }
-    }, true);
-  }
-  cancel(request: string) {
-    this.controllers.get(request)?.abort();
-  }
-  async repair(request: string, blocked = false): Promise<StaticStatus> {
-    await this.initialize();
-    if (blocked || !UUID.test(request) || !this.host.locks)
-      return { ...(await this.status()), repair: 'blocked' };
-    if (!this.host.online()) return { ...(await this.status()), repair: 'offline' };
-    return this.host.locks.request(LOCK + '-repair', { ifAvailable: true }, async (lock) => {
-      if (!lock) return { ...this.statusValue(false, true), repair: 'busy' };
-      let attemptId: string | null = null;
-      let controller: AbortController | undefined;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const setup = await this.run(async () => {
-          const snapshot = await this.snapshot();
-          if (this.failed || !this.selection || snapshot.head?.id !== this.selection.id)
-            throw new Error('Stale worker');
+    }
+    if (!browserID(incoming)) return kind === 'shell' ? recoveryDocument() : Response.error();
+    try {
+      return await this.run(async () => {
+        if (this.unavailable) throw new Error('Unavailable');
+        let s = await this.snapshot();
+        if (s.owner !== this.worker || s.epoch !== this.epoch)
+          throw new Error('Stale navigation writer');
+        if (
+          s.bindings.has(incoming) ||
+          [...s.records.values()].some((r) => r.kind === 'navigation' && r.client === incoming)
+        )
+          throw new Error('Duplicate navigation identity');
+        // Fence never-bound interrupted reservations. Bound records are never abandoned.
+        for (const [id, r] of s.records)
           if (
-            [...snapshot.records.values()].some(
-              (r) => r.kind === 'attempt' && r.request === request,
+            r.kind === 'navigation' &&
+            ![...s.records.values()].some(
+              (b) => (b.kind === 'deliver' || b.kind === 'abandon') && b.reservation === id,
             )
-          )
-            throw new Error('Spent attempt');
-          if (
-            [...snapshot.records.values()].some(
-              (r) =>
-                r.kind === 'finish' &&
-                r.outcome === 'complete' &&
-                (snapshot.records.get(r.attempt) as Attempt)?.base === this.selection!.id,
+          ) {
+            await this.append(s, { kind: 'abandon', reservation: id, outcome: 'abandoned' });
+            s = await this.snapshot();
+          }
+        const selection = s.selection?.body;
+        if (!selection || (selection.kind !== 'activate' && selection.kind !== 'deliver'))
+          throw new Error('No committed selection');
+        let selected = selection.selected,
+          fallback = selection.fallback,
+          adoption: string | null = null;
+        let chosen: string | null = null;
+        const recoveryRequest =
+          [...s.records]
+            .filter(
+              ([id, b]) =>
+                b.kind === 'recovery-request' &&
+                ![...s.records.values()].some(
+                  (v) => v.kind === 'deliver' && v.recoveryRequest === id,
+                ),
             )
-          )
-            return null;
-          const current = this.selection.body as Selection;
-          const instance = crypto.randomUUID();
-          const source = this.candidate(snapshot);
-          const attempt: Attempt = {
-            ...this.base(),
-            kind: 'attempt',
-            request,
-            base: this.selection.id,
-            worker: this.worker,
-            era: current.era,
-            generation: this.descriptor.generation,
-            instance,
-            source,
-          };
-          attemptId = await this.put(attempt);
-          controller = new AbortController();
-          this.controllers.set(request, controller);
-          timer = setTimeout(() => controller!.abort(), this.host.repairDeadline ?? 12000);
-          const reservation: Reservation = {
-            ...this.base(),
-            kind: 'reserve',
-            worker: this.worker,
-            implementation: this.implementation,
-            instance,
-            generation: this.descriptor.generation,
-            purpose: 'repair',
-            previous: null,
-            base: attempt.base,
-            attempt: attemptId,
-          };
-          return { snapshot, source, reservation, reserved: await this.put(reservation) };
-        });
-        if (!setup) return { ...this.statusValue(true, true), repair: 'complete' };
-        await this.fill(
-          this.descriptor,
-          setup.reservation,
-          controller!.signal,
-          setup.source ? { snapshot: setup.snapshot, id: setup.source } : undefined,
+            .at(-1)?.[0] ?? null;
+        const pending = this.pending(s);
+        if (kind === 'shell' && recoveryRequest) {
+          chosen = null;
+        } else if (
+          kind === 'shell' &&
+          pending?.[1].kind === 'finish' &&
+          (await this.verify(s, pending[1].completion))
+        ) {
+          chosen = pending[1].completion;
+          adoption = pending[0];
+          fallback = (await this.verify(s, selected))
+            ? selected
+            : (await this.verify(s, fallback))
+              ? fallback
+              : null;
+          selected = chosen;
+        } else if (await this.verify(s, selected)) chosen = selected;
+        else if (kind === 'shell' && (await this.verify(s, fallback))) {
+          chosen = fallback;
+          selected = fallback;
+          fallback = null;
+        }
+        // Imported v2 UI cannot speak the corrected control protocol. Keep its
+        // verified rollback selection, but use the independent canonical recovery
+        // entry until the corrected application can be adopted. Never reinterpret
+        // a legacy privileged message or inject code into its verified document.
+        if (kind === 'shell' && chosen && this.resource(s, chosen).legacy) chosen = null;
+        if (kind === 'callback' && !chosen) return Response.error();
+        const references = Array.from(
+          new Set([chosen, selected, fallback].filter((v): v is string => !!v)),
         );
+        const n = await this.append(s, {
+          kind: 'navigation',
+          navigation: crypto.randomUUID(),
+          client: incoming,
+          mode: kind === 'shell' ? 'shell' : 'callback',
+          references,
+        });
+        s = await this.snapshot();
+        // Verify the candidate and capture its exact bytes before the joint commit.
+        let response = chosen ? await this.exact(s, chosen, '/') : await recoveryDocument();
+        if (chosen && !(await this.verify(s, chosen))) throw new Error('Candidate changed');
+        await this.append(s, {
+          kind: 'deliver',
+          reservation: n.id,
+          client: incoming,
+          generation: chosen,
+          recovery: chosen === null,
+          selection: s.selection?.id ?? null,
+          selected,
+          fallback,
+          adoption,
+          recoveryRequest: kind === 'shell' ? recoveryRequest : null,
+        });
+        s = await this.snapshot();
+        // Eviction after persistence must not release application bytes or invent a pin.
+        const committed = s.bindings.get(incoming)?.body;
+        if (
+          committed?.kind !== 'deliver' ||
+          committed.generation !== chosen ||
+          (chosen && !(await this.verify(s, chosen)))
+        )
+          throw new Error('Delivery lost storage');
+        if (chosen) response = await this.exact(s, chosen, '/');
+        if (kind === 'callback') {
+          const headers = new Headers(response.headers);
+          headers.set('cache-control', 'no-store');
+          headers.set('referrer-policy', 'no-referrer');
+          response = new Response(response.body, { status: 200, headers });
+        }
+        return response;
+      });
+    } catch {
+      // Only a never-bound reservation can be positively fenced as failed. A
+      // committed delivery remains potentially received even when read-back fails.
+      try {
         await this.run(async () => {
-          controller!.signal.throwIfAborted();
-          const complete = await this.complete(setup.reserved, this.descriptor);
-          controller!.signal.throwIfAborted();
-          await this.put({
-            ...this.base(),
-            kind: 'finish',
-            attempt: attemptId!,
-            outcome: 'complete',
-            completion: complete,
+          const s = await this.snapshot();
+          if (s.owner !== this.worker || s.epoch !== this.epoch) return;
+          const n = [...s.records].find(
+            ([, b]) => b.kind === 'navigation' && b.client === incoming,
+          );
+          if (
+            n &&
+            ![...s.records.values()].some(
+              (b) => (b.kind === 'deliver' || b.kind === 'abandon') && b.reservation === n[0],
+            )
+          )
+            await this.append(s, {
+              kind: 'abandon',
+              reservation: n[0],
+              outcome: 'delivery-failed',
+            });
+        });
+      } catch {
+        /* Unproven ownership remains protected. */
+      }
+      return kind === 'shell' ? recoveryDocument() : Response.error();
+    }
+  }
+  async evidence(client: string, result: 'handled' | 'handling-error'): Promise<void> {
+    await this.initialize();
+    try {
+      await this.run(async () => {
+        const s = await this.snapshot();
+        const b = s.bindings.get(client);
+        if (!b || s.owner !== this.worker || s.epoch !== this.epoch) return;
+        if (
+          [...s.records.values()].some(
+            (v) => v.kind === 'evidence' && v.binding === b.id && v.result === result,
+          )
+        )
+          return;
+        await this.append(s, { kind: 'evidence', binding: b.id, result });
+      });
+    } catch {
+      /* Evidence never changes ownership. */
+    }
+  }
+  async status(client = ''): Promise<StaticStatus> {
+    await this.initialize();
+    const result: StaticStatus = {
+      authority: 'none',
+      prepared: false,
+      ready: false,
+      pending: false,
+      worker: this.worker,
+      epoch: null,
+      binding: null,
+      generation: null,
+      repair: 'unavailable',
+    };
+    try {
+      return await this.run(async () => {
+        if (this.unavailable) return result;
+        const s = await this.snapshot(),
+          b = s.bindings.get(client),
+          d = b?.body;
+        result.epoch = s.epoch;
+        result.binding = b?.id ?? null;
+        result.authority =
+          d?.kind === 'deliver' ? (d.recovery ? 'recovery' : 'application') : 'none';
+        result.generation = d?.kind === 'deliver' ? d.generation : null;
+        result.ready = !!result.generation && (await this.verify(s, result.generation));
+        const own =
+          [...s.records]
+            .filter(
+              ([, v]) =>
+                v.kind === 'complete' &&
+                (s.records.get(v.reservation) as Reserve).producer === this.worker,
+            )
+            .at(-1)?.[0] ?? null;
+        result.prepared = await this.verify(s, own);
+        const pending = this.pending(s);
+        const repaired =
+          !!pending &&
+          pending[1].kind === 'finish' &&
+          (await this.verify(s, pending[1].completion));
+        result.pending = repaired || !result.prepared;
+        result.repair = repaired ? 'complete' : 'idle';
+        const a = [...s.records].filter(([, v]) => v.kind === 'attempt').at(-1);
+        if (a) {
+          const f = [...s.records.values()].find((v) => v.kind === 'finish' && v.attempt === a[0]);
+          result.repair =
+            f?.kind === 'finish'
+              ? f.outcome === 'complete'
+                ? repaired
+                  ? 'complete'
+                  : 'spent'
+                : f.outcome
+              : this.controllers.size
+                ? 'busy'
+                : 'unknown';
+        } else {
+          const cut = [...s.records.values()]
+            .filter((v) => v.kind === 'cutover' || v.kind === 'legacy-update')
+            .at(-1);
+          if ((cut?.kind === 'cutover' || cut?.kind === 'legacy-update') && cut.attempts.length)
+            result.repair = cut.attempts.some((a) => a.outcome === 'unknown') ? 'unknown' : 'spent';
+        }
+        if (
+          !this.host.online() &&
+          !['busy', 'complete', 'unknown', 'failed', 'timed-out', 'cancelled', 'spent'].includes(
+            result.repair,
+          )
+        )
+          result.repair = 'offline';
+        return result;
+      });
+    } catch {
+      return result;
+    }
+  }
+  // Strict v3 protocol. Caller IDs/URLs/generation claims never supply authority.
+  async message(
+    data: unknown,
+    source: { id: string; url: string } | null,
+    origin: string,
+  ): Promise<StaticStatus | undefined> {
+    await this.initialize();
+    if (
+      !source ||
+      origin !== this.host.origin ||
+      !browserID(source.id) ||
+      new URL(source.url).origin !== this.host.origin ||
+      !data ||
+      typeof data !== 'object'
+    )
+      return;
+    const d = data as Record<string, unknown>;
+    if (
+      d.protocol !== PROTOCOL ||
+      typeof d.request !== 'string' ||
+      !UUID.test(d.request) ||
+      !['HELLO', 'STATUS', 'CONFIRM', 'RECOVERY', 'REPAIR', 'CANCEL'].includes(String(d.operation))
+    )
+      return;
+    const hello = d.operation === 'HELLO';
+    if (
+      Object.keys(d).sort().join() !==
+      (hello ? 'operation,protocol,request' : 'binding,epoch,operation,protocol,request,worker')
+    )
+      return;
+    const current = await this.status(source.id);
+    if (hello) return current;
+    if (
+      !current.binding ||
+      d.binding !== current.binding ||
+      d.worker !== this.worker ||
+      d.epoch !== current.epoch
+    )
+      return;
+    try {
+      if (d.operation === 'CONFIRM')
+        await this.run(async () => {
+          const s = await this.snapshot();
+          const b = s.bindings.get(source.id);
+          if (!b || b.id !== d.binding || s.epoch !== d.epoch || s.owner !== this.worker) return;
+          if (
+            [...s.records.values()].some(
+              (v) => v.kind === 'confirm' && (v.binding === b.id || v.request === d.request),
+            )
+          )
+            return;
+          await this.append(s, { kind: 'confirm', binding: b.id, request: d.request as string });
+        });
+      if (d.operation === 'RECOVERY')
+        await this.run(async () => {
+          const s = await this.snapshot(),
+            b = s.bindings.get(source.id);
+          if (
+            !b ||
+            b.id !== d.binding ||
+            b.body.kind !== 'deliver' ||
+            b.body.recovery ||
+            s.epoch !== d.epoch
+          )
+            throw new Error('Recovery request fenced');
+          if (
+            [...s.records.values()].some(
+              (v) =>
+                (v.kind === 'recovery-request' || v.kind === 'confirm' || v.kind === 'attempt') &&
+                v.request === d.request,
+            )
+          )
+            return;
+          await this.append(s, {
+            kind: 'recovery-request',
+            binding: b.id,
+            request: d.request as string,
           });
         });
-        return {
-          ...this.statusValue(await this.verify(await this.snapshot(), this.selected), true),
-          repair: 'complete',
-        };
-      } catch {
-        if (attemptId)
-          await this.run(() =>
-            this.put({
-              ...this.base(),
+      if (d.operation === 'REPAIR') return this.repair(d.request, source.id, d.binding as string);
+      if (d.operation === 'CANCEL')
+        await this.run(async () => {
+          const s = await this.snapshot();
+          const b = s.bindings.get(source.id);
+          if (
+            !b ||
+            b.id !== d.binding ||
+            b.body.kind !== 'deliver' ||
+            !b.body.recovery ||
+            s.epoch !== d.epoch
+          )
+            return;
+          for (const [attempt, controller] of this.controllers) {
+            const a = s.records.get(attempt);
+            if (a?.kind === 'attempt' && a.binding === b.id) {
+              if ([...s.records.values()].some((v) => 'request' in v && v.request === d.request))
+                return;
+              await this.append(s, {
+                kind: 'cancel',
+                binding: b.id,
+                request: d.request as string,
+                attempt,
+              });
+              controller.abort(new DOMException('Cancelled', 'AbortError'));
+            }
+          }
+        });
+      return this.status(source.id);
+    } catch {
+      return { ...current, ready: false, repair: 'unavailable' };
+    }
+  }
+  async repair(request: string, client: string, binding: string): Promise<StaticStatus> {
+    await this.initialize();
+    if (!this.host.locks || !UUID.test(request))
+      return { ...(await this.status(client)), repair: 'blocked' };
+    return this.host.locks.request(
+      repairLock,
+      { mode: 'exclusive', ifAvailable: true },
+      async (lock) => {
+        if (!lock) return { ...(await this.status(client)), repair: 'busy' };
+        let attempt: Stored | null = null;
+        let reservation: Stored | null = null;
+        let timed = false;
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const start = await this.run(async () => {
+            const s = await this.refreshLegacy(await this.snapshot()),
+              b = s.bindings.get(client);
+            if (
+              this.unavailable ||
+              s.owner !== this.worker ||
+              s.epoch !== this.epoch ||
+              b?.id !== binding ||
+              b.body.kind !== 'deliver' ||
+              !b.body.recovery ||
+              !this.host.online()
+            )
+              throw new Error('Repair not authorized');
+            if (
+              [...s.records.values()].some(
+                (v) =>
+                  (v.kind === 'attempt' && v.request === request) ||
+                  ((v.kind === 'cutover' || v.kind === 'legacy-update') &&
+                    v.attempts.some((a) => a.request === request)),
+              )
+            )
+              return null;
+            const pending = this.pending(s);
+            if (pending?.[1].kind === 'finish' && (await this.verify(s, pending[1].completion)))
+              return null;
+            const selected = s.selection?.body;
+            if (!selected || (selected.kind !== 'activate' && selected.kind !== 'deliver'))
+              throw new Error('No repair base');
+            let source: string | null = null;
+            for (const id of [selected.selected, selected.fallback])
+              if (id && !s.sealed.has(id)) {
+                source = id;
+                break;
+              }
+            const instance = crypto.randomUUID();
+            attempt = await this.append(s, {
+              kind: 'attempt',
+              request,
+              binding,
+              source,
+              base: s.selection!.id,
+              instance,
+            });
+            const next = await this.snapshot();
+            reservation = await this.append(next, {
+              kind: 'reserve',
+              instance,
+              purpose: 'repair',
+              source,
+              attempt: attempt.id,
+              generation: this.descriptor.generation,
+              descriptor: this.descriptor,
+              producer: this.worker,
+              implementation: this.implementation,
+              legacy: false,
+            });
+            return { source, snapshot: await this.snapshot() };
+          });
+          if (!start || !attempt || !reservation) return this.status(client);
+          const activeAttempt = attempt as Stored,
+            activeReservation = reservation as Stored;
+          this.controllers.set(activeAttempt.id, controller);
+          timer = setTimeout(() => {
+            timed = true;
+            controller.abort(new DOMException('Deadline', 'TimeoutError'));
+          }, this.host.repairDeadline ?? 12000);
+          const r = activeReservation.body as Reserve;
+          let source: { cache: Cache; descriptor: Descriptor } | undefined;
+          if (start.source) {
+            const owner = this.resource(start.snapshot, start.source);
+            source = {
+              cache: await this.host.caches.open(resourceName(owner)),
+              descriptor: owner.descriptor,
+            };
+          }
+          await this.fill(r, controller.signal, source);
+          const completion = await this.complete(
+            activeReservation.id,
+            activeReservation.body.epoch,
+          );
+          await this.run(async () => {
+            const s = await this.snapshot();
+            controller.signal.throwIfAborted();
+            await this.append(s, {
               kind: 'finish',
-              attempt: attemptId!,
-              outcome: controller?.signal.aborted ? 'cancelled' : 'failed',
-              completion: null,
-            }),
-          ).catch(() => {});
-        return {
-          ...this.statusValue(false, true),
-          repair: controller?.signal.aborted ? 'cancelled' : 'failed',
-        };
-      } finally {
-        if (timer) clearTimeout(timer);
-        this.controllers.delete(request);
-      }
-    });
+              attempt: activeAttempt.id,
+              outcome: 'complete',
+              completion: completion.id,
+            });
+          });
+        } catch {
+          if (attempt)
+            try {
+              await this.run(async () => {
+                const s = await this.snapshot();
+                if (
+                  [...s.records.values()].some(
+                    (v) => v.kind === 'finish' && v.attempt === (attempt as Stored).id,
+                  )
+                )
+                  return;
+                await this.append(s, {
+                  kind: 'finish',
+                  attempt: (attempt as Stored).id,
+                  outcome: timed ? 'timed-out' : controller.signal.aborted ? 'cancelled' : 'failed',
+                  completion: null,
+                });
+              });
+            } catch {
+              /* No durable outcome means unknown/interrupted, never invented failure. */
+            }
+        } finally {
+          if (timer) clearTimeout(timer);
+          if (attempt) this.controllers.delete((attempt as Stored).id);
+        }
+        return this.status(client);
+      },
+    );
   }
   async cleanup(): Promise<boolean> {
     await this.initialize();
-    if (!this.host.locks) return false;
+    // Observations may hang. They are outside the decision lock and do not retire a pin.
+    const observedHead = await this.run(async () => (await this.snapshot()).head?.id ?? null).catch(
+      () => null,
+    );
+    const windows = await this.host.windows();
     return this.run(async () => {
-      try {
-        if (this.failed || this.host.busy() || (await this.host.windows()).length) return false;
-        const snapshot = await this.snapshot();
-        if (!this.selection || snapshot.head?.id !== this.selection.id) return false;
-        const head = this.selection.body as Selection;
-        if (
-          !head.selected ||
-          !head.fallback ||
-          !(await this.verify(snapshot, head.selected)) ||
-          !(await this.verify(snapshot, head.fallback))
-        )
-          return false;
-        const retained = new Set([head.selected, head.fallback]);
-        const ever = new Set(
-          snapshot.chain.flatMap((s) =>
-            (s.body as Selection).selected ? [(s.body as Selection).selected!] : [],
-          ),
-        );
-        // Unselected installs, staging and interrupted work remain reserved. Only
-        // historical selected generations outside the retained pair are eligible.
-        const finished = new Set(
-          [...snapshot.records.values()]
-            .filter((r) => r.kind === 'finish')
-            .map((r) => (r as Finish).attempt),
-        );
-        for (const [id, record] of snapshot.records)
-          if (record.kind === 'attempt' && !finished.has(id) && record.source)
-            retained.add(record.source);
-        const candidates = [...ever].filter((id) => !retained.has(id));
-        if ((await this.host.windows()).length || this.host.busy()) return false;
-        for (const id of candidates) {
-          const { reservation } = this.completion(snapshot, id);
-          if (
-            [...retained].some(
-              (ref) => this.completion(snapshot, ref).reservation.instance === reservation.instance,
-            )
-          )
-            continue;
-          await this.host.caches.delete(resourceName(reservation));
-        }
-        return true;
-      } catch {
+      if (this.unavailable) return false;
+      let s = await this.snapshot();
+      if (
+        s.head?.id !== observedHead ||
+        s.owner !== this.worker ||
+        s.epoch !== this.epoch ||
+        this.host.busy()
+      )
         return false;
+      const retained = s.selection?.body;
+      if (
+        !retained ||
+        (retained.kind !== 'activate' && retained.kind !== 'deliver') ||
+        (!(await this.verify(s, retained.selected)) && !(await this.verify(s, retained.fallback)))
+      )
+        return false;
+      // Resume already sealed deletion idempotently, independent of current enumeration.
+      for (const [id, b] of s.records)
+        if (
+          b.kind === 'seal' &&
+          ![...s.records.values()].some((v) => v.kind === 'deleted' && v.seal === id)
+        ) {
+          for (const ref of b.generations) {
+            const c = s.records.get(ref);
+            if (c?.kind !== 'complete') throw new Error('Lost deletion owner');
+            const r = s.records.get(c.reservation) as Reserve;
+            await this.host.caches.delete(resourceName(r));
+          }
+          await this.append(s, { kind: 'deleted', seal: id });
+          s = await this.snapshot();
+        }
+      // Any legacy/live/unidentified window blocks new seals. Missing windows never unpin.
+      if (windows.length || [...s.records.values()].some((v) => v.kind === 'cutover')) return false;
+      const chosen = s.selection?.body;
+      if (
+        !chosen ||
+        (chosen.kind !== 'activate' && chosen.kind !== 'deliver') ||
+        !(await this.verify(s, chosen.selected)) ||
+        !(await this.verify(s, chosen.fallback))
+      )
+        return false;
+      const protectedSet = this.protected(s.records, s.selection, s.bindings);
+      const candidates = [...s.records]
+        .filter(([id, r]) => r.kind === 'complete' && !s.sealed.has(id) && !protectedSet.has(id))
+        .map(([id]) => id);
+      if (!candidates.length) return false;
+      const seal = await this.append(s, { kind: 'seal', generations: candidates });
+      for (const ref of candidates) {
+        s = await this.snapshot();
+        const c = s.records.get(ref) as Extract<RecordBody, { kind: 'complete' }>;
+        const r = s.records.get(c.reservation) as Reserve;
+        await this.host.caches.delete(resourceName(r));
       }
+      await this.append(await this.snapshot(), { kind: 'deleted', seal: seal.id });
+      return true;
     });
   }
 }

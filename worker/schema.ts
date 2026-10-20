@@ -1,72 +1,104 @@
-import { staticPath, mimeFor } from './policy.ts';
-
-export const META = 'spendspacey-static-meta-v2';
-export const RESOURCE_PREFIX = 'spendspacey-static-resource-v2-';
-export const META_PATH = '/__spendspacey_static_v2__/';
+import { keys, HEX, UUID, validateDescriptor, type Descriptor } from './legacy-schema.ts';
+export {
+  canonical,
+  digest,
+  boundedBytes,
+  validResource,
+  generation,
+  HEX,
+  UUID,
+  type Entry,
+  type Descriptor,
+} from './legacy-schema.ts';
+export const META = 'spendspacey-static-ownership-v3';
+export const META_PATH = '/__spendspacey_ownership_v3__/';
+export const RESOURCE_PREFIX = 'spendspacey-static-resource-v3-';
+// Coordinate with the previous implementation while copying its immutable resources.
 export const LOCK = 'spendspacey-static-v2';
-export const HEX = /^[a-f0-9]{64}$/;
-export const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
-export interface Entry {
-  url: string;
-  key: string;
-  revision: string | null;
-  integrity: string;
-  type: string;
-  bytes: number;
-}
-export interface Descriptor {
-  schema: 2;
+export const PROTOCOL = 3;
+export type Outcome = 'complete' | 'failed' | 'timed-out' | 'cancelled';
+export type Op =
+  | {
+      kind: 'reserve';
+      instance: string;
+      purpose: 'install' | 'repair' | 'import';
+      generation: string;
+      source: string | null;
+      attempt: string | null;
+      descriptor: Descriptor;
+      producer: string;
+      implementation: string;
+      legacy: boolean;
+    }
+  | { kind: 'complete'; reservation: string }
+  | {
+      kind: 'activate';
+      installation: string;
+      selected: string | null;
+      fallback: string | null;
+      nextEpoch: string;
+    }
+  | {
+      kind: 'navigation';
+      navigation: string;
+      client: string;
+      mode: 'shell' | 'callback';
+      references: string[];
+    }
+  | {
+      kind: 'deliver';
+      reservation: string;
+      client: string;
+      generation: string | null;
+      recovery: boolean;
+      selection: string | null;
+      selected: string | null;
+      fallback: string | null;
+      adoption: string | null;
+      recoveryRequest: string | null;
+    }
+  | { kind: 'recovery-request'; binding: string; request: string }
+  | { kind: 'cancel'; binding: string; request: string; attempt: string }
+  | { kind: 'confirm'; binding: string; request: string }
+  | { kind: 'evidence'; binding: string; result: 'handled' | 'handling-error' }
+  | { kind: 'abandon'; reservation: string; outcome: 'delivery-failed' | 'abandoned' }
+  | {
+      kind: 'attempt';
+      request: string;
+      binding: string;
+      source: string | null;
+      base: string;
+      instance: string;
+    }
+  | { kind: 'finish'; attempt: string; outcome: Outcome; completion: string | null }
+  | {
+      kind: 'cutover';
+      legacyHead: string | null;
+      legacyDigest: string;
+      attempts: { request: string; outcome: Outcome | 'unknown' }[];
+      protected: string[];
+      eligible: string[];
+    }
+  | {
+      kind: 'legacy-update';
+      cutover: string;
+      legacyHead: string | null;
+      legacyDigest: string;
+      attempts: { request: string; outcome: Outcome | 'unknown' }[];
+      protected: string[];
+      eligible: string[];
+    }
+  | { kind: 'seal'; generations: string[] }
+  | { kind: 'deleted'; seal: string };
+export type RecordBody = Op & {
+  schema: 3;
   origin: string;
-  scope: '/';
   compatibility: string;
-  generation: string;
-  entries: Entry[];
-}
-interface Base {
-  schema: 2;
-  origin: string;
-  compatibility: string;
-}
-export type Reservation = Base & {
-  kind: 'reserve';
   worker: string;
-  implementation: string;
-  instance: string;
-  generation: string;
-  purpose: 'install' | 'repair';
-  previous: string | null;
-  base: string | null;
-  attempt: string | null;
-};
-export type Completion = Base & { kind: 'complete'; reservation: string; descriptor: Descriptor };
-export type Selection = Base & {
-  kind: 'select';
+  epoch: string | null;
   parent: string | null;
   sequence: number;
-  worker: string;
-  era: string;
-  selected: string | null;
-  fallback: string | null;
-  reason: 'activate' | 'repair' | 'recover';
-  installation: string | null;
 };
-export type Attempt = Base & {
-  kind: 'attempt';
-  source: string | null;
-  request: string;
-  base: string;
-  worker: string;
-  era: string;
-  generation: string;
-  instance: string;
-};
-export type Finish = Base & {
-  kind: 'finish';
-  attempt: string;
-  outcome: 'complete' | 'failed' | 'cancelled';
-  completion: string | null;
-};
-export type RecordBody = Reservation | Completion | Selection | Attempt | Finish;
 export interface Stored {
   id: string;
   body: RecordBody;
@@ -75,251 +107,187 @@ export interface Snapshot {
   records: Map<string, RecordBody>;
   chain: Stored[];
   head: Stored | null;
+  selection: Stored | null;
+  epoch: string | null;
+  owner: string | null;
+  bindings: Map<string, Stored>;
+  sealed: Set<string>;
 }
-
-export function canonical(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
-  if (value && typeof value === 'object')
-    return (
-      '{' +
-      Object.keys(value)
-        .sort()
-        .map(
-          (key) => JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key]),
-        )
-        .join(',') +
-      '}'
-    );
-  return JSON.stringify(value);
-}
-export async function digest(value: string | Uint8Array): Promise<string> {
-  const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource))]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
-export async function generation(entries: Entry[], compatibility: string) {
-  return digest(canonical({ entries, compatibility }));
-}
-export async function boundedBytes(response: Response, max: number): Promise<Uint8Array> {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('Missing body');
-  const parts: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > max) throw new Error('Oversized response');
-      parts.push(value);
-    }
-  } finally {
-    // A cloned response is a tee: waiting for cancellation can wait forever for
-    // the untouched branch. Cancel promptly without blocking validation failure.
-    void reader.cancel().catch(() => {});
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const part of parts) {
-    bytes.set(part, offset);
-    offset += part.length;
-  }
-  return bytes;
-}
-export function keys(value: unknown, expected: string[]): asserts value is Record<string, unknown> {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    Object.keys(value).sort().join() !== expected.sort().join()
-  )
-    throw new Error('Invalid record structure');
-}
-function id(value: unknown, nullable = false) {
+export const metadataURL = (origin: string, id: string) => origin + META_PATH + id;
+export const resourceName = (r: { instance: string }) => RESOURCE_PREFIX + r.instance;
+export function identity(value: unknown, nullable = false): asserts value is string {
   if (!(nullable && value === null) && !(typeof value === 'string' && HEX.test(value)))
     throw new Error('Invalid identity');
 }
-function uuid(value: unknown) {
-  if (typeof value !== 'string' || !UUID.test(value)) throw new Error('Invalid instance');
+export function browserID(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
-export async function validateDescriptor(
+export async function validateBody(
   value: unknown,
   origin: string,
   compatibility: string,
-): Promise<Descriptor> {
-  keys(value, ['schema', 'origin', 'scope', 'compatibility', 'generation', 'entries']);
-  if (
-    value.schema !== 2 ||
-    value.origin !== origin ||
-    value.scope !== '/' ||
-    value.compatibility !== compatibility
-  )
-    throw new Error('Incompatible descriptor');
-  id(value.generation);
-  if (!Array.isArray(value.entries) || value.entries.length < 11 || value.entries.length > 128)
-    throw new Error('Invalid inventory');
-  let previous = '';
-  let total = 0;
-  for (const entry of value.entries) {
-    keys(entry, ['url', 'key', 'revision', 'integrity', 'type', 'bytes']);
-    if (
-      typeof entry.url !== 'string' ||
-      !staticPath(entry.url) ||
-      entry.url <= previous ||
-      entry.key !== entry.url ||
-      entry.type !== mimeFor(entry.url)
-    )
-      throw new Error('Invalid static mapping');
-    if (
-      !(
-        entry.revision === null ||
-        (typeof entry.revision === 'string' && /^[a-f0-9]{32}$/.test(entry.revision))
-      ) ||
-      typeof entry.integrity !== 'string' ||
-      !/^sha256-[A-Za-z0-9+/]{43}=$/.test(entry.integrity) ||
-      !Number.isSafeInteger(entry.bytes) ||
-      Number(entry.bytes) < 1 ||
-      Number(entry.bytes) > 2 * 1024 * 1024
-    )
-      throw new Error('Invalid static expectation');
-    previous = entry.url;
-    total += Number(entry.bytes);
-  }
-  const urls = value.entries.map((entry) => entry.url as string);
-  for (const required of [
-    '/',
-    '/manifest.webmanifest',
-    '/google-g.png',
-    '/fonts/google-sans-medium.woff2',
-    '/icons/app-192.png',
-    '/icons/app-512.png',
-    '/icons/maskable-512.png',
-    '/icons/apple-touch-icon.png',
-  ])
-    if (!urls.includes(required)) throw new Error('Incomplete inventory');
-  if (
-    total > 8 * 1024 * 1024 ||
-    !urls.some((url) => /^\/assets\/index-.*\.js$/.test(url)) ||
-    !urls.some((url) => /^\/assets\/supabase-.*\.js$/.test(url)) ||
-    !urls.some((url) => url.endsWith('.css'))
-  )
-    throw new Error('Missing chunks');
-  if ((await generation(value.entries as unknown as Entry[], compatibility)) !== value.generation)
-    throw new Error('Generation binding failed');
-  return value as unknown as Descriptor;
-}
-export async function validateBody(
-  input: unknown,
-  origin: string,
-  compatibility: string,
+  legacyCompatibility: string,
 ): Promise<RecordBody> {
-  if (!input || typeof input !== 'object' || !('kind' in input))
-    throw new Error('Invalid metadata');
-  const body = input as Record<string, unknown>;
+  if (!value || typeof value !== 'object' || !('kind' in value))
+    throw new Error('Unsupported record');
+  const v = value as Record<string, unknown>;
   const fields: Record<string, string[]> = {
     reserve: [
-      'worker',
-      'implementation',
       'instance',
-      'generation',
       'purpose',
-      'previous',
-      'base',
+      'generation',
+      'source',
       'attempt',
+      'descriptor',
+      'producer',
+      'implementation',
+      'legacy',
     ],
-    complete: ['reservation', 'descriptor'],
-    select: [
-      'parent',
-      'sequence',
-      'worker',
-      'era',
+    complete: ['reservation'],
+    activate: ['installation', 'selected', 'fallback', 'nextEpoch'],
+    navigation: ['navigation', 'client', 'mode', 'references'],
+    deliver: [
+      'reservation',
+      'client',
+      'generation',
+      'recovery',
+      'selection',
       'selected',
       'fallback',
-      'reason',
-      'installation',
+      'adoption',
+      'recoveryRequest',
     ],
-    attempt: ['request', 'base', 'worker', 'era', 'generation', 'instance', 'source'],
+    'recovery-request': ['binding', 'request'],
+    cancel: ['binding', 'request', 'attempt'],
+    confirm: ['binding', 'request'],
+    evidence: ['binding', 'result'],
+    abandon: ['reservation', 'outcome'],
+    attempt: ['request', 'binding', 'source', 'base', 'instance'],
     finish: ['attempt', 'outcome', 'completion'],
+    cutover: ['legacyHead', 'legacyDigest', 'attempts', 'protected', 'eligible'],
+    'legacy-update': ['cutover', 'legacyHead', 'legacyDigest', 'attempts', 'protected', 'eligible'],
+    seal: ['generations'],
+    deleted: ['seal'],
   };
-  const kind = String(body.kind);
-  if (!(kind in fields)) throw new Error('Unsupported metadata');
-  keys(body, ['schema', 'origin', 'compatibility', 'kind', ...fields[kind]]);
-  if (body.schema !== 2 || body.origin !== origin || body.compatibility !== compatibility)
-    throw new Error('Incompatible metadata');
-  if ('worker' in body) id(body.worker);
-  if ('implementation' in body) id(body.implementation);
-  if ('instance' in body) uuid(body.instance);
-  if ('generation' in body) id(body.generation);
-  if ('era' in body) uuid(body.era);
-  if (kind === 'reserve') {
-    id(body.previous, true);
-    id(body.base, true);
-    id(body.attempt, true);
-    if (!['install', 'repair'].includes(String(body.purpose)))
-      throw new Error('Invalid reservation');
-  }
-  if (kind === 'complete') {
-    id(body.reservation);
-    await validateDescriptor(body.descriptor, origin, compatibility);
-  }
-  if (kind === 'select') {
-    id(body.parent, true);
-    id(body.installation, true);
-    id(body.selected, true);
-    id(body.fallback, true);
-    if (
-      !Number.isSafeInteger(body.sequence) ||
-      Number(body.sequence) < 0 ||
-      !['activate', 'repair', 'recover'].includes(String(body.reason))
-    )
-      throw new Error('Invalid selection');
-  }
-  if (kind === 'attempt') {
-    uuid(body.request);
-    id(body.base);
-    id(body.source, true);
-  }
-  if (kind === 'finish') {
-    id(body.attempt);
-    id(body.completion, true);
-    if (
-      !['complete', 'failed', 'cancelled'].includes(String(body.outcome)) ||
-      (body.outcome === 'complete') !== (body.completion !== null)
-    )
-      throw new Error('Invalid outcome');
-  }
-  return body as unknown as RecordBody;
-}
-export function resourceName(reservation: Reservation) {
-  return RESOURCE_PREFIX + reservation.instance;
-}
-export function metadataURL(origin: string, id: string) {
-  return origin + META_PATH + id;
-}
-export async function validResource(
-  entry: Entry,
-  response: Response,
-  origin: string,
-): Promise<boolean> {
+  const kind = String(v.kind);
+  if (!Object.hasOwn(fields, kind)) throw new Error('Unsupported record');
+  keys(v, [
+    'schema',
+    'origin',
+    'compatibility',
+    'worker',
+    'epoch',
+    'parent',
+    'sequence',
+    'kind',
+    ...fields[kind],
+  ]);
   if (
-    response.status !== 200 ||
-    response.redirected ||
-    (response.url !== '' && response.url !== origin + entry.url) ||
-    ['opaque', 'opaqueredirect', 'error'].includes(response.type) ||
-    response.headers.get('content-type')?.split(';')[0].trim() !== entry.type
+    v.schema !== 3 ||
+    v.origin !== origin ||
+    v.compatibility !== compatibility ||
+    !Number.isSafeInteger(v.sequence) ||
+    Number(v.sequence) < 0
   )
-    return false;
-  try {
-    const bytes = await boundedBytes(response.clone(), entry.bytes);
-    const hash = await digest(bytes);
-    return (
-      bytes.length === entry.bytes &&
-      'sha256-' +
-        btoa(String.fromCharCode(...hash.match(/../g)!.map((byte) => parseInt(byte, 16)))) ===
-        entry.integrity
-    );
-  } catch {
-    return false;
+    throw new Error('Incompatible record');
+  identity(v.worker);
+  identity(v.parent, true);
+  if (v.epoch !== null && !(typeof v.epoch === 'string' && UUID.test(v.epoch)))
+    throw new Error('Invalid epoch');
+  for (const field of [
+    'reservation',
+    'generation',
+    'source',
+    'attempt',
+    'installation',
+    'selected',
+    'fallback',
+    'selection',
+    'adoption',
+    'binding',
+    'base',
+    'completion',
+    'legacyHead',
+    'cutover',
+    'legacyDigest',
+    'recoveryRequest',
+    'seal',
+    'producer',
+    'implementation',
+  ])
+    if (field in v)
+      identity(
+        v[field],
+        [
+          'generation',
+          'source',
+          'attempt',
+          'selected',
+          'fallback',
+          'selection',
+          'adoption',
+          'completion',
+          'legacyHead',
+          'recoveryRequest',
+        ].includes(field),
+      );
+  for (const field of ['instance', 'navigation', 'request', 'nextEpoch'])
+    if (field in v && !(typeof v[field] === 'string' && UUID.test(v[field])))
+      throw new Error('Invalid operation identity');
+  if ('client' in v && !browserID(v.client)) throw new Error('Invalid browser identity');
+  for (const field of ['references', 'generations', 'protected', 'eligible'])
+    if (field in v) {
+      if (
+        !Array.isArray(v[field]) ||
+        (v[field] as unknown[]).length > 128 ||
+        new Set(v[field] as unknown[]).size !== (v[field] as unknown[]).length
+      )
+        throw new Error('Invalid reference set');
+      for (const ref of v[field] as unknown[]) identity(ref);
+    }
+  if (kind === 'reserve') {
+    if (
+      !['install', 'repair', 'import'].includes(String(v.purpose)) ||
+      typeof v.legacy !== 'boolean'
+    )
+      throw new Error('Invalid resource owner');
+    await validateDescriptor(v.descriptor, origin, v.legacy ? legacyCompatibility : compatibility);
+    if ((v.descriptor as Descriptor).generation !== v.generation)
+      throw new Error('Descriptor identity');
   }
+  if (kind === 'navigation' && !['shell', 'callback'].includes(String(v.mode)))
+    throw new Error('Invalid navigation');
+  if (
+    kind === 'deliver' &&
+    (typeof v.recovery !== 'boolean' || v.recovery !== (v.generation === null))
+  )
+    throw new Error('Invalid delivery');
+  if (kind === 'abandon' && !['delivery-failed', 'abandoned'].includes(String(v.outcome)))
+    throw new Error('Invalid abandonment evidence');
+  if (kind === 'evidence' && !['handled', 'handling-error'].includes(String(v.result)))
+    throw new Error('Invalid evidence');
+  if (
+    kind === 'finish' &&
+    (!['complete', 'failed', 'timed-out', 'cancelled'].includes(String(v.outcome)) ||
+      (v.outcome === 'complete') !== (v.completion !== null))
+  )
+    throw new Error('Invalid outcome');
+  if (kind === 'cutover' || kind === 'legacy-update') {
+    if ((v.eligible as string[]).some((id) => !(v.protected as string[]).includes(id)))
+      throw new Error('Unowned legacy eligibility');
+    if (!Array.isArray(v.attempts) || v.attempts.length > 1024) throw new Error('Invalid history');
+    const seen = new Set();
+    for (const a of v.attempts) {
+      keys(a, ['request', 'outcome']);
+      if (
+        typeof a.request !== 'string' ||
+        !UUID.test(a.request) ||
+        seen.has(a.request) ||
+        !['complete', 'failed', 'timed-out', 'cancelled', 'unknown'].includes(String(a.outcome))
+      )
+        throw new Error('Invalid history');
+      seen.add(a.request);
+    }
+  }
+  return v as unknown as RecordBody;
 }

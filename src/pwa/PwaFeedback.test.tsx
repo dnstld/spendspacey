@@ -47,7 +47,7 @@ async function mount(locale: 'en' | 'pt-BR' = 'en', overrides: Partial<AuthConte
 }
 describe('localized static preparation and recovery feedback', () => {
   it.each(['en', 'pt-BR'] as const)(
-    'distinguishes preparation from control and shows close/reopen guidance in %s',
+    'distinguishes preparation from control and shows reload/reopen guidance in %s',
     async (locale) => {
       mock.state.repaired = true;
       await mount(locale);
@@ -55,7 +55,7 @@ describe('localized static preparation and recovery feedback', () => {
         locale === 'en' ? 'Prepared for offline' : 'Preparado para uso offline',
       );
       expect(
-        screen.getByText(locale === 'en' ? /Repair is complete/ : /O reparo foi concluído/),
+        screen.getByText(locale === 'en' ? /Verified repair is ready/ : /O reparo foi concluído/),
       ).toBeVisible();
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
       mock.state.repaired = false;

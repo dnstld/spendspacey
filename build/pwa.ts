@@ -52,10 +52,19 @@ export const pwaOptions: Partial<VitePWAOptions> = {
 
 export function pwaPlugins(policy: unknown, config: unknown): Plugin[] {
   const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
-  const compatibility = hash(
+  const legacyCompatibility = hash(
     JSON.stringify({
       routing: 2,
       offlineResponse: 2,
+      authPolicy: policy,
+      configuration: hash(JSON.stringify(config)),
+      scope: '/',
+    }),
+  );
+  const compatibility = hash(
+    JSON.stringify({
+      routing: 3,
+      offlineResponse: 3,
       authPolicy: policy,
       configuration: hash(JSON.stringify(config)),
       scope: '/',
@@ -101,13 +110,16 @@ export function pwaPlugins(policy: unknown, config: unknown): Plugin[] {
             // Include compiled worker implementation identity without a circular
             // self-hash: this is the pre-injection bundle containing its placeholder.
             const implementation = hash(await readFile(resolve(directory, 'sw.js')));
-            const worker = hash(canonical({ entries: manifest, compatibility, implementation }));
+            const worker = hash(
+              canonical({ entries: manifest, compatibility, legacyCompatibility, implementation }),
+            );
             return {
               manifest: manifest.map((entry) => ({
                 ...entry,
                 worker,
                 implementation,
                 compatibility,
+                legacyCompatibility,
                 size: entry.bytes,
               })),
               warnings: [],
