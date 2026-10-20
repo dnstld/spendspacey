@@ -76,3 +76,13 @@ The localized static shell and language selector SHALL remain usable when sessio
 - **THEN** the user can see the shell and change language while receiving reconnect guidance
 - **AND** no fresh authentication, durable profile availability, or current server verification is claimed
 - **AND** later SDK results still obey existing ordering and cleanup rules
+
+#### Scenario: Independent recovery has no authentication authority
+- **WHEN** the worker serves embedded canonical recovery
+- **THEN** it does not import/execute Auth, inspect SDK storage or make Auth/API requests
+- **AND** callback clones require their own committed generation binding, retain no-store/no-referrer and fail closed without a verified document; no callback cleanup is claimed without application execution
+
+#### Scenario: Existing callback route forms execute cleanup with document ownership
+- **WHEN** a controlled navigation matches the application's existing case-insensitive, trailing-slash or encoded-segment callback route
+- **THEN** a verified selected canonical document clone receives its own committed binding before delivery, retaining no-store/no-referrer and application-owned URL cleanup
+- **AND** no callback URL, query, fragment or sensitive input enters metadata, cache keys, logs or generated artifacts; unrecognized paths receive no worker fallback

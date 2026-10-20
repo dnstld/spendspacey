@@ -43,11 +43,11 @@ The application SHALL make the complete static shell available offline after suc
 
 ### Requirement: Service-worker caches contain static assets only
 
-The service worker SHALL store only reviewed same-origin static build assets. It SHALL NOT store API responses, OAuth traffic, callback responses, avatars or other user information, authentication parameters, tokens, credentials, or non-GET requests. No private application data snapshot SHALL be introduced by this change.
+The service worker SHALL store only reviewed same-origin static build assets and strictly bounded reserved static-generation metadata. It SHALL NOT store API responses, OAuth traffic, callback responses, avatars or other user information, authentication parameters, tokens, credentials, or non-GET requests. No private application data snapshot SHALL be introduced by this change.
 
 #### Scenario: Sensitive traffic is excluded
 - **WHEN** sign-in, callback handling, session refresh, avatar loading, and sign-out have occurred
-- **THEN** inspecting every service-worker cache shows only approved static assets
+- **THEN** inspecting every service-worker cache shows only approved static assets and bounded reserved static-generation metadata
 - **AND** no Supabase request or callback navigation URL is used as a cache key, and no API/profile response, synthetic private identity value, or authentication secret is stored
 - **AND** the public Supabase origin and publishable key embedded in ordinary static application code are not treated as private response data
 - **AND** requests with authorization headers and arbitrary query-string variants cannot enter static caching
@@ -63,11 +63,11 @@ New application versions SHALL wait for safe activation without forcing a page r
 
 #### Scenario: A replacement is ready
 - **WHEN** a new worker finishes preparing a complete replacement while application windows remain open
-- **THEN** the application announces that an update is ready and explains closing all app windows and reopening
+- **THEN** the application announces that an update is ready and explains reopening after normal worker activation; a reload may adopt repaired files once the corrected worker is active
 - **AND** it does not automatically activate the replacement or reload a callback or authentication operation
 
 #### Scenario: Replacement activates
-- **WHEN** all old application windows have closed and the replacement activates
+- **WHEN** the replacement has normally activated and a new eligible document navigates
 - **THEN** the next launch uses the complete replacement and also works offline
 - **AND** explicit language preference and normal SDK session storage remain available
 
@@ -78,11 +78,12 @@ New application versions SHALL wait for safe activation without forcing a page r
 
 ### Requirement: Static cache versions and recovery are bounded
 
-Static caches SHALL have application-specific ownership and revisioning, remove obsolete owned assets after successful activation, and provide bounded online recovery from missing assets. Static-cache repair SHALL preserve authentication storage, language preference, and unrelated local data.
+Static caches SHALL have application-specific ownership and revisioning, conservatively remove obsolete generations only after independent selected/fallback validation and ownership checks, and provide bounded online recovery from missing assets. Static-cache repair SHALL preserve authentication storage, language preference, and unrelated local data. Reserved metadata SHALL contain only bounded static descriptors and lifecycle records, never network responses or private application data.
 
 #### Scenario: Obsolete assets are removed
-- **WHEN** a new complete version activates
-- **THEN** obsolete Spendspacey static cache entries are removed without deleting unrelated origin caches or application data
+- **WHEN** a complete selected generation and compatible rollback fallback are independently validated and no clients or in-flight work may require older generations
+- **THEN** obsolete historically selected resource caches may be removed without deleting unrelated origin caches or application data
+- **AND** uncertainty defers cleanup; legacy caches without trustworthy metadata are not migrated or selected; explicit validated v2 imports use new-owned storage and preserve repair history
 - **AND** cache-policy schema changes have an explicit version boundary
 
 #### Scenario: A required chunk is missing
@@ -125,3 +126,89 @@ Completion SHALL require manual PM installation from Chrome on an iPhone and sta
 - **AND** sanitized iPhone model, tested iOS and Chrome versions, deployed version, production URL, and manual PM pass/fail evidence is recorded without identity values or real-account traces
 - **AND** desktop Chromium evidence does not substitute for the actual installed-app online/offline checks; Safari-specific manual acceptance is not required
 - **AND** this change remains incomplete until actual installation/offline/update evidence passes
+
+### Requirement: Canonical entry preparation and durable generation selection
+
+The worker SHALL represent emitted `index.html` only as canonical `/`, deriving revision and integrity from emitted bytes and rejecting redirects. First online preparation SHALL completely persist resources, verified completion and committed selection in that order. The next ordinary load SHALL acquire control even offline, without automatic reload.
+
+#### Scenario: Pages canonicalizes index.html
+- **WHEN** the host redirects `/index.html` to `/`
+- **THEN** the worker prepares canonical `/` without requesting the redirected entry
+- **AND** offline next-load control and both locales work after that single online preparation
+
+#### Scenario: New worker starts without a live predecessor
+- **WHEN** the worker starts or restarts
+- **THEN** it discovers strictly validated metadata only in its reserved namespace and recomputes resource integrity
+- **AND** it restores committed selection through deterministic parent-linked lineage, independently of cache enumeration or timestamps
+- **AND** its worker identity remains distinct from the selected generation, with policy/configuration digests checked
+- **AND** malformed, incompatible, contradictory, unsupported or ambiguous metadata yields unavailable status or deferred cleanup
+
+#### Scenario: Waiting replacement loses a required resource
+- **WHEN** a complete waiting replacement becomes incomplete or corrupt before activation
+- **THEN** activation independently validates and selects its committed compatible predecessor if usable
+- **AND** neither generation is deleted if both are unusable, and resources are never mixed
+
+#### Scenario: Existing windows survive restart and repair
+- **WHEN** a worker restarts or repair completes while earlier windows remain open
+- **THEN** their immutable browser-client generation binding remains pinned, even when unusable
+- **AND** unusable pinned resources produce recovery/unavailable feedback, without switching live windows
+- **AND** a new eligible canonical navigation or reload can adopt repaired files while all earlier bindings remain unchanged
+
+#### Scenario: Repair stops or fails
+- **WHEN** explicit repair fails, times out, is cancelled, is interrupted or is requested offline
+- **THEN** its persisted attempt boundary prevents automatic restart or replay
+- **AND** a cancellable deadline bounds exact static requests in separate staging, leaving staging unselected and selected/fallback intact
+
+#### Scenario: Cleanup has uncertain ownership
+- **WHEN** controlled, uncontrolled, hidden, unresponsive, newly navigating or unidentifiable windows or cross-worker reservations may require a generation
+- **THEN** cleanup defers deletion and includes uncontrolled clients in its assessment
+- **AND** selected plus validated rollback fallback is a retention target rather than an unconditional cache limit
+
+#### Scenario: Accepted compatible rollback
+- **WHEN** compatible complete versions are selected in the order v1, v2, v1
+- **THEN** committed lineage selects the requested whole version and preserves one independently validated rollback fallback
+- **AND** SDK/locale storage and unrelated caches remain untouched; production phone acceptance remains separate
+
+#### Scenario: Cross-worker selection is stale
+- **WHEN** an older worker attempts activation or mutation after another worker commits a newer selection
+- **THEN** the installation's committed-parent boundary and immutable ownership records prevent overwriting the newer selection
+- **AND** a genuine compatible rollback requires a fresh installation reservation bound to the current selection
+
+#### Scenario: Metadata and compatibility remain static-only
+- **WHEN** metadata is discovered or used during recovery
+- **THEN** strict bounded schema, ownership, worker/generation identity, origin/scope, routing/offline/Auth/deployment compatibility, configuration digest, inventory, mappings, MIME, integrity and completion binding are checked
+- **AND** cached resource integrity is independently recomputed before use
+- **AND** no publishable keys, private configuration, credentials, tokens, sessions or user payloads are persisted in metadata
+- **AND** metadata is never fetched from network, routed, repaired or treated as an authentication or durability boundary
+
+### Requirement: Durable document ownership precedes delivery
+
+Every application document, including a callback clone, SHALL have an exact browser-client generation binding committed jointly with any selection change before bytes are released. Persistence SHALL be awaited and independently read back. Subresources SHALL use only their exact binding. Ambiguous ownership SHALL retain references without blocking other valid new documents.
+
+#### Scenario: Delivery is interrupted
+- **WHEN** termination occurs at reservation, joint commit, response, handling or confirmation boundaries
+- **THEN** startup restores validated lineage and immutable bindings, never guesses successful delivery or closure
+- **AND** a never-bound operation can release references only after a durable fence; potentially delivered bindings remain protected
+
+#### Scenario: New document adopts a repaired generation
+- **WHEN** a valid browser-issued resulting identity navigates after successful repair
+- **THEN** a joint commit selects verified files and binds that incoming document
+- **AND** existing/frozen/BFCache documents continue exclusively on their original generation; no optional navigation hints or physical-window closure proof are required
+
+### Requirement: Independent canonical recovery remains reachable
+
+An exact eligible canonical root navigation without a usable application generation SHALL receive a build-verified worker-embedded bilingual recovery document. It SHALL use exact hashed CSP, no-store/no-referrer and no external dependencies or Auth/API activity. Missing binding/metadata SHALL grant guidance only. Callback and unknown paths SHALL never receive it.
+
+#### Scenario: Bootstrap resources are evicted
+- **WHEN** canonical HTML, the main bundle or lazy SDK chunk is missing/corrupt online or offline
+- **THEN** canonical reload/cold launch displays independent localized recovery without fetching network HTML
+- **AND** deliberate bound repair preserves its spent-attempt boundary across restart, reports unknown missing outcomes honestly and never automatically navigates the current document
+
+### Requirement: Cleanup sealing and explicit upgrade preserve ownership
+
+Deletion SHALL require a persisted validated seal excluding every protected reference. Sealed generations SHALL reject all new references. Upgrade SHALL validate actual v2 data, preserve repair history, copy older bytes into new-owned storage and never manufacture legacy bindings.
+
+#### Scenario: Cleanup or import is interrupted
+- **WHEN** termination races sealing/deletion/import or a new binding/source reservation
+- **THEN** the shared writer boundary prevents reference/deletion conflicts, deletion resumes idempotently and incomplete imports remain unusable
+- **AND** ambiguous/legacy references remain protected without quota-based expiry

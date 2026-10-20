@@ -14,7 +14,7 @@ function inventory(dir: string) {
   return new Map(
     readdirSync(dir, { recursive: true })
       .map(String)
-      .filter((path) => /\.(html|js|css|png|woff2)$/.test(path))
+      .filter((path) => /\.(html|js|css|png|woff2|webmanifest)$/.test(path))
       .map((path) => [path, readFileSync(resolve(dir, path))]),
   );
 }
@@ -25,6 +25,7 @@ const mime: Record<string, string> = {
   css: 'text/css',
   png: 'image/png',
   woff2: 'font/woff2',
+  webmanifest: 'application/manifest+json',
 };
 
 async function serveArtifact(context: BrowserContext, origin: string, kind = 'production') {
@@ -39,7 +40,10 @@ async function serveArtifact(context: BrowserContext, origin: string, kind = 'pr
     if (url.origin === origin) {
       const path = url.pathname.slice(1);
       const file = files.has(path) ? path : 'index.html'; // native SPA fallback contract
-      if (/^assets\/supabase-/.test(path)) sdkRequests.push(path);
+      // The worker precaches every required static chunk, including the SDK.
+      // Only a page import would execute the module that can construct Auth.
+      if (/^assets\/supabase-/.test(path) && !route.request().serviceWorker())
+        sdkRequests.push(path);
       return route.fulfill({
         body: files.get(file),
         headers: {
@@ -110,6 +114,7 @@ for (const [kind, origin] of [
     context,
     page,
   }) => {
+    test.setTimeout(90000); // Full callback/unknown-path matrix with durable ownership verification.
     const calls = await serveArtifact(context, origin, kind);
     // An expired saved session would trigger refresh if an Auth client existed.
     await context.addInitScript(
@@ -152,14 +157,21 @@ for (const [kind, origin] of [
     }
     for (const path of unrelatedPaths) {
       const url = `${origin}${path}?code=synthetic-unrelated#error=synthetic-unrelated`;
-      await page.goto(url);
+      // Unknown native Pages HTML is not an owned application document. With a
+      // controller its unbound assets fail closed; it must never borrow selection.
+      await page.goto(origin);
       await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+      await page.goto(url);
+      if (await page.evaluate(() => !!navigator.serviceWorker.controller))
+        await expect(page.getByRole('button', { name: 'Sign in with Google' })).toHaveCount(0);
+      else await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
       expect(page.url()).toBe(url);
     }
+    await page.goto(origin);
     await page.getByRole('combobox').selectOption('pt-BR');
     await expect(page.getByRole('alert')).toContainText('indisponível neste endereço');
     expect(calls.authRequests).toEqual([]);
-    // All SDK construction lives in this lazy module; denied launches never load it.
+    // All SDK construction lives in this lazy module; denied pages never import it.
     // Unit tests also spy on createClient directly, including invalid configuration.
     expect(calls.sdkRequests).toEqual([]);
     expect(calls.exchanges()).toBe(0);

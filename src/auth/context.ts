@@ -12,8 +12,8 @@ export interface AuthContextValue extends AuthState {
   pending: 'signIn' | 'signOut' | null;
   message: AuthMessage | null;
   retry: () => void;
-  signIn: () => Promise<void>;
-  signOut: () => Promise<void>;
+  signIn: (tryConnection?: boolean) => Promise<void>;
+  signOut: (tryConnection?: boolean) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

@@ -70,6 +70,8 @@ try {
     const path = `.cache/deploy-auth-shell/${kind}`;
     if (existsSync(path)) cpSync(path, join(staging, 'pages-builds', kind), { recursive: true });
   }
+  if (existsSync('.cache/installable-offline-shell'))
+    cpSync('.cache/installable-offline-shell', join(staging, 'pwa-builds'), { recursive: true });
   run(binary, ['dir', staging, '--redact', '--no-banner']);
   run(binary, ['git', '.', '--log-opts=--all', '--redact', '--no-banner']);
   console.log(

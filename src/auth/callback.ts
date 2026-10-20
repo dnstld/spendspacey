@@ -32,6 +32,7 @@ export function exchangeOnce(client: SupabaseClient, code: string): Promise<Call
   let result = clientExchanges.get(code);
   if (!result) {
     result = (async (): Promise<CallbackResult> => {
+      if (navigator.onLine === false) return { ok: false, message: 'offlineCallback' };
       try {
         requireAuthStorage();
         const { data, error } = await client.auth.exchangeCodeForSession(code);

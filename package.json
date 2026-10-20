@@ -9,19 +9,21 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "pnpm typecheck && vite build",
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json",
     "test:unit": "node scripts/with-test-env.mjs exec vitest run",
     "test:config": "node scripts/check-config.mjs",
     "test:delivery": "node scripts/check-delivery.mjs",
     "spec:validate": "openspec validate --all --strict --no-interactive",
     "test:e2e": "node scripts/with-test-env.mjs exec playwright test",
     "secret:scan": "node scripts/secret-scan.mjs",
-    "build:test": "node scripts/with-test-env.mjs build --mode development"
+    "build:test": "node scripts/with-test-env.mjs build --mode development",
+    "test:pwa": "node scripts/check-pwa.mjs",
+    "test:pwa:versions": "node scripts/prepare-pwa-versions.mjs"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "1.3.1",
@@ -58,6 +60,9 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.2",
     "vite": "8.3.4",
-    "vitest": "5.0.5"
+    "vite-plugin-pwa": "2.0.0",
+    "vitest": "5.0.5",
+    "workbox-core": "7.4.1",
+    "workbox-precaching": "7.4.1"
   }
 }

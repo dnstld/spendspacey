@@ -18,7 +18,7 @@ function safeImage(value: unknown): string | undefined {
 
 export function AuthScreen() {
   const { t } = useTranslation();
-  const { status, session, message, pending, retry, signOut } = useAuth();
+  const { status, session, message, pending, retry, signIn, signOut } = useAuth();
   if (status === 'initializing') return <p role="status">{t(($) => $.auth.loading)}</p>;
   if (status === 'error')
     return (
@@ -83,6 +83,14 @@ export function AuthScreen() {
           <h1 className="mb-4 text-4xl font-semibold tracking-tight">Spendspacey</h1>
           <GoogleSignInButton />
         </>
+      )}
+      {(message === 'offlineSignIn' || message === 'offlineSignOut') && (
+        <Button
+          variant="outline"
+          onClick={() => void (message === 'offlineSignIn' ? signIn(true) : signOut(true))}
+        >
+          {t(($) => $.common.connectionRetry)}
+        </Button>
       )}
       <Feedback message={authenticationAllowed() ? message : 'previewAuthentication'} />
     </>

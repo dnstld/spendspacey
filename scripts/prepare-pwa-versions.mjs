@@ -1,0 +1,56 @@
+import { build } from 'vite';
+import { SYNTHETIC_ENV } from '../test/config.ts';
+// Two complete synthetic builds, using the actual production worker pipeline.
+Object.assign(process.env, SYNTHETIC_ENV);
+for (const key of ['CF_PAGES', 'CF_PAGES_BRANCH', 'CF_PAGES_URL']) delete process.env[key];
+for (const version of ['v1', 'v2']) {
+  await build({
+    mode: 'development',
+    build: { outDir: `.cache/installable-offline-shell/${version}` },
+    plugins: [
+      {
+        name: 'synthetic-version-marker',
+        transform(code, id) {
+          if (id.endsWith('/src/main.tsx'))
+            return code + `\ndocument.documentElement.dataset.syntheticVersion = '${version}';`;
+        },
+      },
+    ],
+  });
+}
+
+// Build the actual reviewed predecessor, not a hand-authored approximation of
+// its metadata. Full CI history supplies this immutable revision; no checkout,
+// settings change or live account is involved.
+const { execFileSync } = await import('node:child_process');
+const { mkdtempSync, symlinkSync, rmSync } = await import('node:fs');
+const { tmpdir } = await import('node:os');
+const { resolve, join } = await import('node:path');
+const legacyRoot = mkdtempSync(join(tmpdir(), 'spendspacey-069dbc50-'));
+try {
+  const archive = execFileSync('git', ['archive', '069dbc50f4a34b76fefd2a3eb934388d452a8b5a'], {
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  execFileSync('tar', ['-x', '-C', legacyRoot], { input: archive });
+  symlinkSync(resolve('node_modules'), join(legacyRoot, 'node_modules'), 'dir');
+  await build({
+    root: legacyRoot,
+    configFile: join(legacyRoot, 'vite.config.ts'),
+    mode: 'development',
+    build: {
+      outDir: resolve('.cache/installable-offline-shell/legacy-069dbc50'),
+      emptyOutDir: true,
+    },
+    plugins: [
+      {
+        name: 'synthetic-legacy-version-marker',
+        transform(code, id) {
+          if (id.endsWith('/src/main.tsx'))
+            return code + "\ndocument.documentElement.dataset.syntheticVersion='legacy-069dbc50';";
+        },
+      },
+    ],
+  });
+} finally {
+  rmSync(legacyRoot, { recursive: true, force: true });
+}
