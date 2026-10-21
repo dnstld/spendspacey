@@ -11,11 +11,11 @@ Change 2/4. No profiles query, IndexedDB/Dexie, private application snapshot, ba
 ## 2. Offline auth feedback and worker lifecycle
 
 - [x] 2.1 Keep shell/language controls usable while SDK restoration needs unavailable network; add typed localized sign-in/sign-out connection guidance and offline callback recovery without queued/replayed operations. Verify component and browser cases for expired/offline initialization, query/fragment scrubbing, duplicate exchange protection, actual SDK failure states, and preserved Phase 1 race/localization safeguards.
-- [ ] 2.2 Add normal waiting-update guidance, owned cache revision/cleanup, coalesced update checks, and bounded missing-chunk recovery. Verify a focused two-version worker test with open clients, complete offline replacement, failed installation retaining the old version, and recovery without loops or deleting SDK/locale/unrelated data. Document normal waiting-worker close/reopen separately from repaired-file adoption on a new document navigation or reload, and worker-aware rollback in this group.
+- [x] 2.2 Add normal waiting-update guidance, owned cache revision/cleanup, coalesced update checks, and bounded missing-chunk recovery. Verify a focused two-version worker test with open clients, complete offline replacement, failed installation retaining the old version, and recovery without loops or deleting SDK/locale/unrelated data. Document normal waiting-worker close/reopen separately from repaired-file adoption on a new document navigation or reload, and worker-aware rollback in this group.
 
 ## 3. CI, publication, and installation acceptance
 
-- [ ] 3.1 Extend the existing Linux job with manifest/Chromium installability diagnostics and the focused offline/cache/update suite. Verify the documented full synthetic checks plus strict OpenSpec validation pass with pinned actions, sanitized failure artifacts, no live-account/host credentials, no Lighthouse PWA score gate, and no browser-matrix expansion.
+- [x] 3.1 Extend the existing Linux job with manifest/Chromium installability diagnostics and the focused offline/cache/update suite. Verify the documented full synthetic checks plus strict OpenSpec validation pass with pinned actions, sanitized failure artifacts, no live-account/host credentials, no Lighthouse PWA score gate, and no browser-matrix expansion.
 - [ ] 3.2 After review/CI and the accepted merge to `main`, publish through the existing Pages GitHub integration at the predecessor's production origin. Verify actual worker/manifest bytes/MIME, root scope, revalidation, native SPA fallback without top-level `404.html` or catch-all rewrites, callback no-store/no-referrer, and CSP compatibility. Check required assets exist and reject fallback HTML as a valid worker/chunk; do not require arbitrary missing paths to return 404 or add Cloudflare runtime/storage products. Record version/URL/header outcomes without claiming local preview proves host behavior.
 - [ ] 3.3 Have the PM record the iPhone model and tested iOS/Google Chrome versions, open the production Pages URL in Chrome, use Share → Add to Home Screen, confirm the Spendspacey name/intended icon, and launch from the Home Screen. Verify standalone web-app presentation rather than an ordinary browser bookmark/tab. From that installed app, complete online sign-in/identity/sign-out, reach static readiness, and verify airplane-mode reload and full close/reopen, both languages, safe areas, touch controls, avatar fallbacks, and reconnect guidance. Record sanitized versions/URL/revision/pass-fail evidence; desktop Chromium cannot replace this manual PM gate and Safari-specific manual acceptance is not required.
 - [ ] 3.4 Publish a compatible accepted replacement merged into `main`, or identify a previously accepted complete production replacement, at that same origin and verify the waiting notice plus close-all-windows/reopen transition in the same installed iPhone Home Screen app added through Chrome; verify worker-aware recovery/rollback against complete builds. Record tested iOS/Chrome versions and sanitized update evidence without adding any application data feature.
@@ -35,9 +35,20 @@ Implement immutable browser-client generation bindings and joint selection/deliv
 
 ## Deterministic repair-outcome correction
 
-Tasks 2.2 and 3.1 are reopened for the approved first-effective authorized-stop
-ordering and durable uncertainty correction. Re-complete only after deterministic
-engine/browser coverage and repeated pinned Linux CI evidence pass. Task 3.2 stays
-unchecked in this branch; its production evidence belongs to the separate paused
-acceptance work. Tasks 3.3/3.4 remain unchecked; keep this change unarchived and later
-changes planning-only.
+Tasks 2.2 and 3.1 were reopened for the approved first-effective authorized-stop
+ordering and durable uncertainty correction, then re-completed after local and
+pinned Ubuntu verification: 80 deterministic cases × 10 repetitions (800 executions
+per matrix), 528 unit/component tests, 57 Chromium tests, all build/configuration/
+inventory/recovery/update/rollback/cutover/cleanup checks, secrets and strict
+OpenSpec validation. Implementation commit `0bc021e1eb6fb10233b052c851390739de29a128`
+passed [Linux CI](https://github.com/dnstld/spendspacey/actions/runs/39648317658)
+and its Pages preview passed recovery/repair/adoption with zero SDK execution or
+provider traffic. Final exact-head checks are linked from
+[draft PR #5](https://github.com/dnstld/spendspacey/pull/5/checks); see the
+[verification record](../../../docs/installable-offline-shell-verification.md).
+
+Progress returns to **6/9**. Task 3.2 stays unchecked here; its production evidence
+belongs only to the separate paused acceptance work until post-fix reconciliation.
+Tasks 3.3/3.4 remain unchecked; the change is unarchived and later changes remain
+planning-only. No production/external settings changed; reviewer approval is
+required before merge.

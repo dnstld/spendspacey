@@ -71,25 +71,50 @@ cleanup coverage; production/phone behavior is not inferred from these fixtures.
 
 Node **24.21.0**, pnpm **10.27.0**, Playwright **1.64.1**; dependency lockfile unchanged.
 
-| Check                                                   | Result                                                                              |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Frozen installation                                     | Passed with pinned Node/pnpm                                                        |
-| Focused deterministic repetition                        | **800/800 executions passed**, 80 cases × 10, ordinary/constrained; 13.74 s locally |
-| Full unit/component suite                               | **528 passed in 21 files**                                                          |
-| Full Chromium suite                                     | **57 passed**, including 26 PWA/update/recovery/cutover cases; no retries           |
-| Application and worker types / lint                     | Passed                                                                              |
-| Configuration rejection                                 | Passed, including 46 unsafe URL/Pages metadata builds                               |
-| Builds                                                  | Local test plus production, preview and unclassified Pages variants passed          |
-| Manifest / inventory / integrity / recovery             | Passed, 11 exact assets per build; exact CSP and worker implementation identity     |
-| Versioned worker fixtures                               | Corrected v1/v2 and actual 069dbc50 predecessor built successfully                  |
-| Strict OpenSpec                                         | **7 passed, 0 failed**; existing informational notices unchanged                    |
-| Formatting / secrets / exact-head Linux / Pages preview | Recorded after the corresponding final verification gates below                     |
+| Check                                                   | Result                                                                                         |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Frozen installation                                     | Passed with pinned Node/pnpm                                                                   |
+| Focused deterministic repetition                        | **800/800 executions passed**, 80 cases × 10, ordinary/constrained; 13.74 s locally            |
+| Full unit/component suite                               | **528 passed in 21 files**                                                                     |
+| Full Chromium suite                                     | **57 passed**, including 26 PWA/update/recovery/cutover cases; no retries                      |
+| Application and worker types / lint                     | Passed                                                                                         |
+| Configuration rejection                                 | Passed, including 46 unsafe URL/Pages metadata builds                                          |
+| Builds                                                  | Local test plus production, preview and unclassified Pages variants passed                     |
+| Manifest / inventory / integrity / recovery             | Passed, 11 exact assets per build; exact CSP and worker implementation identity                |
+| Versioned worker fixtures                               | Corrected v1/v2 and actual 069dbc50 predecessor built successfully                             |
+| Strict OpenSpec                                         | **7 passed, 0 failed**; existing informational notices unchanged                               |
+| Formatting / secrets / exact-head Linux / Pages preview | Formatting and pinned Gitleaks inventory/build/history scans passed; CI/preview evidence below |
 
-The pinned Ubuntu 24.04 job now runs the repeated deterministic matrix before the
-full unit/browser/build checks. Tasks 2.2 and 3.1 are reopened pending that Linux
-and representative engine/browser evidence. Final exact-head CI and Pages preview
-links/results will be recorded with the draft correction PR. No production or
-external settings are changed, and no merge is authorized.
+The pinned Ubuntu 24.04 job runs the repeated deterministic matrix before the
+full unit/browser/build checks. Implementation commit
+`0bc021e1eb6fb10233b052c851390739de29a128` passed the complete
+[Linux run 39648317658](https://github.com/dnstld/spendspacey/actions/runs/39648317658)
+on its first attempt: 800 matrix executions, 528 unit/component tests, 57 Chromium
+tests, frozen install, formatting/lint/types, all configuration/build/inventory/
+recovery/update/rollback/cutover/cleanup checks, secret scanning and strict OpenSpec.
+Tasks **2.2 and 3.1 were reopened and re-completed only after this evidence passed**.
+Progress is **6/9**; **3.2, 3.3 and 3.4 remain unchecked**. The change remains
+unarchived and later changes planning-only.
+
+The final follow-up changes only this record and task evidence; runtime, tests,
+workflow, lockfile and builds remain those of the validated implementation commit.
+[Draft PR #5 exact-head checks](https://github.com/dnstld/spendspacey/pull/5/checks)
+identify the final head, its complete rerun and corresponding Pages deployment.
+The final review handoff records the full head SHA, run and deployment URL after
+those checks finish. These checks must match that head before reviewer approval;
+no merge is authorized. Production and external settings are unchanged.
+
+### Hosted preview evidence
+
+Implementation commit `0bc021e1eb6fb10233b052c851390739de29a128` deployed successfully to
+[Pages preview 5cf9acfa](https://5cf9acfa.spendspacey.pages.dev).
+Independent HTTP/isolated Chromium verification passed: 11 exact asset byte lengths,
+MIME and integrity hashes; manifest identity; canonical entry 308; worker scope and
+headers; callback no-store/no-referrer; preparation/control; offline reload;
+Portuguese cold recovery; deliberate static repair and reload adoption; disabled
+preview sign-in; **0 page SDK imports and 0 cross-origin requests**.
+This is preview evidence only; Task 3.2 production evidence stays in the paused
+acceptance branch and is not copied here.
 
 ## Original ownership correction evidence (historical)
 
