@@ -212,3 +212,34 @@ Deletion SHALL require a persisted validated seal excluding every protected refe
 - **WHEN** termination races sealing/deletion/import or a new binding/source reservation
 - **THEN** the shared writer boundary prevents reference/deletion conflicts, deletion resumes idempotently and incomplete imports remain unusable
 - **AND** ambiguous/legacy references remain protected without quota-based expiry
+
+### Requirement: Repair terminal ordering and durable uncertainty
+
+Repair SHALL preserve the first effective authorized stop decision while undecided, freeze terminal selection before finish persistence, and publish definitive outcomes only from validated persisted finish evidence. Uncertain persistence SHALL remain unknown until independently resolved.
+
+#### Scenario: Cancellation and deadline compete
+- **WHEN** authorized cancellation and deadline callbacks compete, including within one scheduling turn
+- **THEN** actual execution of the first abort determines cancelled versus timed-out
+- **AND** clicks, message arrival and incompletely persisted cancellation do not establish priority
+- **AND** a later abort path or stale callback cannot replace the first reason or a frozen decision
+- **AND** both abort paths guard an already-aborted signal and a frozen decision; cancellation repeats both checks after authorization append/read-back, immediately before abort
+- **AND** classification uses private worker-owned identities through `controller.signal.reason`, never exception names or strings; a persisted cancellation request is not a terminal outcome
+
+#### Scenario: Failure is observed before persistence
+- **WHEN** repair enters its catch boundary without a frozen decision
+- **THEN** it synchronously freezes cancelled for its cancellation sentinel, timed-out for its deadline sentinel, or failed otherwise, before any awaited operation
+- **AND** an unrelated abort-like exception remains failed; ordinary failure priority starts at this observation boundary
+- **AND** the deadline is immediately disarmed and cannot change the outcome during snapshot, write, read-back or publication
+
+#### Scenario: Success is selected after completion validation
+- **WHEN** staging fill, completion persistence, read-back and lineage validation succeed
+- **THEN** the existing writer lock obtains the final pre-finish snapshot and performs the final abort check
+- **AND** an authorized abort already effective at that check wins; otherwise complete with the validated completion reference is frozen and the deadline immediately disarmed
+- **AND** a deadline during that snapshot may win, but one during finish append/read-back cannot replace selected success
+
+#### Scenario: Finish persistence is uncertain
+- **WHEN** selected finish write, read-back or lineage cannot be validated
+- **THEN** the immediate repair result is unknown and no replacement outcome is appended, including after selected success
+- **AND** later STATUS or restart may validate an existing finish; a missing finish remains unknown even with persisted cancellation evidence
+- **AND** the repair lock remains held through settlement and final result determination, hangs retain the lock, and rejected persistence never replenishes the attempt
+- **AND** no automatic request starts, partial staging remains unselected, completed staging requires a validated successful finish for adoption, and incomplete-staging retention is unchanged

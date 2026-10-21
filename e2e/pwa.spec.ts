@@ -649,7 +649,11 @@ for (const locale of ['en', 'pt-BR'])
       const original = (await selection(page)).head.body.selected;
       const sdk = await damageSelected(page);
       const requests: string[] = [];
-      context.on('request', (r) => requests.push(r.url()));
+      const pageSdkImports: string[] = [];
+      context.on('request', (r) => {
+        requests.push(r.url());
+        if (new URL(r.url()).pathname === sdk && !r.serviceWorker()) pageSdkImports.push(r.url());
+      });
       const start = host.state.requests.length;
       const response = await page.reload();
       await expect(
@@ -668,8 +672,13 @@ for (const locale of ['en', 'pt-BR'])
       );
       expect((await selection(page)).head.body.selected).toBe(original);
       expect(
-        requests.filter((url) => /auth\.example|accounts\.google|\/auth\/v1|\/api\//.test(url)),
+        requests.filter((url) =>
+          /auth\.example|supabase\.|google\.|\/(?:auth|oauth|user|session|profile|api)(?:\/|\?|$)/i.test(
+            url,
+          ),
+        ),
       ).toEqual([]);
+      expect(pageSdkImports).toEqual([]);
       expect(host.state.requests.slice(start).filter((path) => path !== '/sw.js')).toEqual([sdk]);
       const oldStatus = await message(old, 'STATUS');
       expect(oldStatus.ready).toBe(false);

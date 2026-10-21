@@ -32,3 +32,23 @@ Tasks 1.3 and 2.2 were reopened after independent reproduction of Pages' entry r
 ## Approved document ownership correction
 
 Implement immutable browser-client generation bindings and joint selection/delivery commits, writer fencing and read-back verification in a new namespace. Embed the independent localized recovery document with exact CSP hashes. Cover all interruption boundaries, explicit v2 cutover, conservative indefinite ownership retention, sealed cleanup, callback binding, bounded deliberate repair and absent-hint navigation. Re-complete 1.3/2.2 only with representative engine/browser evidence; refresh 1.2/3.1 and retest 2.1. Gates 3.2–3.4 remain unchecked.
+
+## Deterministic repair-outcome correction
+
+Tasks 2.2 and 3.1 were reopened for the approved first-effective authorized-stop
+ordering and durable uncertainty correction, then re-completed after local and
+pinned Ubuntu verification: 80 deterministic cases × 10 repetitions (800 executions
+per matrix), 528 unit/component tests, 57 Chromium tests, all build/configuration/
+inventory/recovery/update/rollback/cutover/cleanup checks, secrets and strict
+OpenSpec validation. Implementation commit `0bc021e1eb6fb10233b052c851390739de29a128`
+passed [Linux CI](https://github.com/dnstld/spendspacey/actions/runs/39648317658)
+and its Pages preview passed recovery/repair/adoption with zero SDK execution or
+provider traffic. Final exact-head checks are linked from
+[draft PR #5](https://github.com/dnstld/spendspacey/pull/5/checks); see the
+[verification record](../../../docs/installable-offline-shell-verification.md).
+
+Progress returns to **6/9**. Task 3.2 stays unchecked here; its production evidence
+belongs only to the separate paused acceptance work until post-fix reconciliation.
+Tasks 3.3/3.4 remain unchecked; the change is unarchived and later changes remain
+planning-only. No production/external settings changed; reviewer approval is
+required before merge.

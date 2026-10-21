@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { StaticFixture, origin, navigation } from '../../test/staticGenerations';
 import { Generations } from '../../worker/generations';
+import { blockRepair, RepairDeadline } from '../../test/repairOutcomes';
 import {
   META,
   LOCK,
@@ -346,22 +347,23 @@ describe('strict recovery and deliberate bounded repair', () => {
       const { f, g } = await ready();
       const binding = await recovery(f, g);
       const request = crypto.randomUUID();
+      const deadline = new RepairDeadline();
+      g.host.scheduleRepairDeadline = deadline.schedule;
+      let blocked: ReturnType<typeof blockRepair> | undefined;
       if (outcome === 'offline') f.online = false;
       else if (outcome === 'failed') f.failPath = '/assets/supabase-sharedxx.js';
       else if (outcome === 'unknown') {
         f.failPath = '/assets/supabase-sharedxx.js';
         f.failKind = 'finish';
       } else {
-        f.delayPath = '/assets/supabase-sharedxx.js';
-        f.deadline = 20;
-        g.host.repairDeadline = 20;
+        blocked = blockRepair(f, g);
       }
       const pending = g.repair(request, 'recovery-1', binding);
+      if (blocked) await blocked.entered;
       if (outcome === 'cancelled') {
-        while (!f.releaseDelay) await new Promise((r) => setTimeout(r, 1));
         expect((await g.repair(crypto.randomUUID(), 'recovery-1', binding)).repair).toBe('busy');
         await rpc(g, 'recovery-1', 'CANCEL');
-      }
+      } else if (outcome === 'timed-out') deadline.fire();
       const result = await pending;
       expect(result.repair).toBe(outcome);
       const count = f.fetches.length;
@@ -998,19 +1000,20 @@ describe('extended interruption and concurrency matrix', () => {
   it('a replayed cancellation cannot cancel a subsequent deliberate repair', async () => {
     const { f, g } = await ready();
     const binding = await recovery(f, g);
-    f.delayPath = '/assets/supabase-sharedxx.js';
-    g.host.repairDeadline = 1000;
+    const deadline = new RepairDeadline();
+    g.host.scheduleRepairDeadline = deadline.schedule;
+    const blocked = blockRepair(f, g);
     const cancelID = crypto.randomUUID();
     const first = g.repair(crypto.randomUUID(), 'recovery-1', binding);
-    while (!f.releaseDelay) await new Promise((r) => setTimeout(r, 1));
+    await blocked.entered;
     await rpc(g, 'recovery-1', 'CANCEL', cancelID);
     expect((await first).repair).toBe('cancelled');
-    f.releaseDelay = undefined;
+    const nextBlocked = blockRepair(f, g);
     const second = g.repair(crypto.randomUUID(), 'recovery-1', binding);
-    while (!f.releaseDelay) await new Promise((r) => setTimeout(r, 1));
+    await nextBlocked.entered;
     await rpc(g, 'recovery-1', 'CANCEL', cancelID);
     expect((await g.status('recovery-1')).repair).toBe('busy');
-    (f.releaseDelay as unknown as () => void)();
+    nextBlocked.release();
     expect((await second).repair).toBe('complete');
   });
   it.each(['beforeDelete', 'afterDelete'])(

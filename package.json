@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json",
+    "test:repair": "node scripts/check-repair-races.mjs",
     "test:unit": "node scripts/with-test-env.mjs exec vitest run",
     "test:config": "node scripts/check-config.mjs",
     "test:delivery": "node scripts/check-delivery.mjs",

@@ -46,6 +46,32 @@ Embed the recovery document, both locales and exact CSP hashes in worker impleme
 
 Persist deliberate repair attempts before static network requests. One shared flight, separate staging, exact canonical inventory, independent MIME/integrity checks and a cancelling deadline apply. Page timeout does not release the worker lock. Duplicate/spent IDs do not restart work; reload/restart/reconnect/status never repair. Outcomes distinguish offline hint, running/busy, failed, timed out, cancelled, unknown/interrupted, spent and verified pending adoption. Missing durable outcome is unknown. Revalidate completed staging at the next eligible navigation; never switch the existing document. Guidance says reopen or reload; physical iPhone evidence remains 3.4.
 
+Repair terminal decisions use first-effective authorized-stop ordering. Each flight has
+private worker-owned cancellation/deadline sentinel identities and an immutable terminal
+decision. Both abort paths reject an already-aborted signal or frozen decision; cancellation
+repeats these checks after its awaited request append/read-back, immediately before abort.
+Only the actual first abort establishes stop priority, including callbacks runnable in one
+turn. A persisted cancellation record authorizes a request; it is not a terminal outcome.
+Classify only by identity of `controller.signal.reason`, never thrown error names.
+
+At catch entry, synchronously freeze cancellation, timeout or ordinary failure before any
+awaited lock, snapshot or persistence. Ordinary failure priority starts at that observation,
+not an inferred earlier network event. On success, retain fill → persisted/validated
+completion → completion read-back/lineage → writer lock → final snapshot → abort check.
+At that check freeze complete only if no authorized abort won. Disarm the deadline at
+selection and again in finally; stale callbacks still check both guards. A deadline during
+the final snapshot can win; one during finish persistence cannot replace selected success.
+
+Selection and persistence success are separate. Persist only the frozen decision once;
+failed success persistence cannot fall through into a failed replacement finish. If finish
+write/read-back/lineage cannot be validated, this operation returns unknown even if bytes
+might have been written. Later STATUS/restart can independently validate the existing finish.
+Missing finish remains unknown, including when cancellation evidence exists. Never infer a
+definitive outcome from transient memory or reconstruct a replacement record. Keep the
+outer repair Web Lock through persistence/read-back settlement and final result determination;
+hanging persistence retains the lock, rejection may settle unknown, and the attempt stays
+spent. Incomplete staging retention, cleanup and adoption rules are unchanged.
+
 Before cleanup persist a deletion seal for exact proven-unreferenced generations. Sealed resources cannot gain any selection, binding, repair/import source or reservation reference. Resume deletion idempotently after restart. All pins (including unconfirmed/ambiguous), selected/fallback, legacy, staging and in-flight references protect resources; inclusive browser observations only add conservative deferral. Never expire ownership for quota/cache-count targets.
 
 Cut over actual 069dbc50 v2 data only through its explicit validator: descriptors, worker/configuration identities, lineage, completions and repair history. Preserve spent/unknown history and persist a validated cutover. Copy older generations into new-owned caches and independently verify them before usable completion; interrupted imports are unselected. Leave legacy caches untouched. Do not guess bindings for pre-pin clients; fail their unbound subresources closed and require new navigation. Reject legacy privileged messages and unsupported newer metadata. Older static bytes under the corrected worker are distinct from redeploying an obsolete worker implementation. An imported v2 UI cannot speak the corrected control protocol: keep its verified rollback selected/protected, but use embedded recovery for canonical entry and a safely bound selected clone for callbacks. Refresh legacy repair history at activation/startup and before repair, sharing the old/new single-flight lock so waiting-period attempts remain spent.
