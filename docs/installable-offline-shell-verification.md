@@ -1,6 +1,99 @@
 # Installable offline shell verification
 
-Branch: `feat/installable-offline-shell`, draft [PR #4](https://github.com/dnstld/spendspacey/pull/4).
+## Deterministic repair-outcome correction (2026-10-21)
+
+Branch: `fix/repair-outcome-ordering`, clean main baseline
+`fae9f51b489db95d672a4761cbd9ecef80b53de6`. The separate paused
+`docs/accept-installable-offline-shell` worktree and its uncommitted production
+acceptance evidence are not imported or modified here. Task 3.2 remains unchecked.
+
+### Failure evidence and diagnosis
+
+[Merge CI attempt 1](https://github.com/dnstld/spendspacey/actions/runs/39474487087/attempts/1)
+and [attempt 2](https://github.com/dnstld/spendspacey/actions/runs/39474487087/attempts/2)
+both failed `strict recovery and deliberate bounded repair > reports cancelled
+without automatic retry or lock release by page timeout` at
+`src/pwa/generations.test.ts:366`, expecting cancelled and receiving timed-out.
+The test durations were 84/92 ms; generation-file durations were 9,116/9,983 ms;
+both suites finished 447/448. Assertion log timestamps were
+2026-10-20T18:25:28.0912772Z and 18:46:01.3233637Z. The separate timeout case passed
+in 101/85 ms. [Attempt 3](https://github.com/dnstld/spendspacey/actions/runs/39474487087/attempts/3)
+passed 448/448 in 12.44 s; unchanged local verification also passed. Neither rerun
+establishes correctness. Historical logs lack abort/selection/persistence event
+traces, so they cannot disambiguate the actual failing ordering.
+
+There are two established defects: the test gave cancellation only a 20 ms deadline
+while awaiting multiple status/metadata operations, and production classified from
+a mutable `timed` flag after awaiting a terminal snapshot. An already effective
+cancellation could therefore become a persisted timeout while storage was slow.
+The unchanged engine reproduced cancellation-first/timeout-classified 30/30 times
+with a delayed terminal read and 20/20 with explicit deadline control. Moving that
+same deadline into the finish write preserved cancellation. Ordinary failure could
+also become timeout during its terminal snapshot.
+
+### Corrected behavior and regression method
+
+Private worker-owned sentinel identities classify `signal.reason`. Both abort
+paths check prior abort and frozen decision, and cancellation repeats the checks
+after authorization write/read-back. First actual abort wins, without cancellation
+preference. Catch entry freezes failure synchronously before awaited work. Success
+is selected at the existing final abort check, after validated completion and the
+final writer-locked snapshot. Selection immediately disarms the timer; stale
+callbacks remain guarded. Persistence never changes selection or retries with a
+replacement outcome. A failed/unvalidated finish returns unknown immediately;
+later STATUS/restart may validate an existing finish. Cancellation evidence alone
+remains unknown. The repair lock spans persistence settlement and final result
+determination. Attempt spending, staging retention, cleanup and adoption are unchanged.
+
+`src/pwa/repairOutcome.test.ts` exercises 40 cases under both ordinary and constrained
+scheduling: **80 cases per matrix**, each repeated **10 times by `pnpm test:repair`**.
+Constrained mode yields metadata work to later scheduling turns; explicit barriers
+and an injected deadline determine ordering, rather than elapsed time. The original
+cancellation/timeout and replayed-cancellation tests now use these controls.
+
+Coverage includes both stop orderings, callbacks in the same turn, cancellation
+write/read-back, persisted requests before abort, slow authorization, final terminal
+snapshot, finish write/read-back/lineage, prior ordinary failure, success selected
+with pending persistence, rejected writes, uncertain successful writes, missing
+finish, independent STATUS/restart resolution, identity-only classification, stale
+callbacks, lock retention through publication, one spent attempt, no automatic
+additional fetch, partial staging and no adoption without validated success.
+Every failure emits ordered diagnostics for authorization, actual abort, selection
+via deadline disarm, writes/read-back/lineage, status publication and lock release.
+
+Real-worker Chromium checks both locales and prove zero page SDK imports and zero
+Supabase/Google/OAuth/Auth/user/session/profile/API requests through cold recovery
+and repair. The only downloaded repair file is the approved same-origin static SDK
+asset, fetched as bytes. Browser tests also retain update, rollback, cutover and
+cleanup coverage; production/phone behavior is not inferred from these fixtures.
+
+### Verification on the correction
+
+Node **24.21.0**, pnpm **10.27.0**, Playwright **1.64.1**; dependency lockfile unchanged.
+
+| Check                                                   | Result                                                                              |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Frozen installation                                     | Passed with pinned Node/pnpm                                                        |
+| Focused deterministic repetition                        | **800/800 executions passed**, 80 cases × 10, ordinary/constrained; 13.74 s locally |
+| Full unit/component suite                               | **528 passed in 21 files**                                                          |
+| Full Chromium suite                                     | **57 passed**, including 26 PWA/update/recovery/cutover cases; no retries           |
+| Application and worker types / lint                     | Passed                                                                              |
+| Configuration rejection                                 | Passed, including 46 unsafe URL/Pages metadata builds                               |
+| Builds                                                  | Local test plus production, preview and unclassified Pages variants passed          |
+| Manifest / inventory / integrity / recovery             | Passed, 11 exact assets per build; exact CSP and worker implementation identity     |
+| Versioned worker fixtures                               | Corrected v1/v2 and actual 069dbc50 predecessor built successfully                  |
+| Strict OpenSpec                                         | **7 passed, 0 failed**; existing informational notices unchanged                    |
+| Formatting / secrets / exact-head Linux / Pages preview | Recorded after the corresponding final verification gates below                     |
+
+The pinned Ubuntu 24.04 job now runs the repeated deterministic matrix before the
+full unit/browser/build checks. Tasks 2.2 and 3.1 are reopened pending that Linux
+and representative engine/browser evidence. Final exact-head CI and Pages preview
+links/results will be recorded with the draft correction PR. No production or
+external settings are changed, and no merge is authorized.
+
+## Original ownership correction evidence (historical)
+
+Historical branch: `feat/installable-offline-shell`, [PR #4](https://github.com/dnstld/spendspacey/pull/4).
 Correction baseline: `069dbc50f4a34b76fefd2a3eb934388d452a8b5a`.
 Original clean/main baseline: `d786441215a1c9e6fb2d048262fc4d09b5d79e44`.
 Node `24.21.0`, pnpm `10.27.0`. Dependencies and lockfile are unchanged.
@@ -146,7 +239,7 @@ Exact remaining unchecked tasks:
 - [ ] 3.3 Have the PM record the iPhone model and tested iOS/Google Chrome versions, open the production Pages URL in Chrome, use Share → Add to Home Screen, confirm the Spendspacey name/intended icon, and launch from the Home Screen. Verify standalone web-app presentation rather than an ordinary browser bookmark/tab. From that installed app, complete online sign-in/identity/sign-out, reach static readiness, and verify airplane-mode reload and full close/reopen, both languages, safe areas, touch controls, avatar fallbacks, and reconnect guidance. Record sanitized versions/URL/revision/pass-fail evidence; desktop Chromium cannot replace this manual PM gate and Safari-specific manual acceptance is not required.
 - [ ] 3.4 Publish a compatible accepted replacement merged into `main`, or identify a previously accepted complete production replacement, at that same origin and verify the waiting notice plus close-all-windows/reopen transition in the same installed iPhone Home Screen app added through Chrome; verify worker-aware recovery/rollback against complete builds. Record tested iOS/Chrome versions and sanitized update evidence without adding any application data feature.
 
-PR #4 remains draft; the change remains unarchived and later changes planning-only.
+PR #4 was merged at the correction baseline. The change remains unarchived and later changes planning-only.
 Production publication, iPhone installation/offline acceptance and installed-iPhone
 update/rollback are deliberately outstanding. No production, Cloudflare, Supabase,
 Google, DNS or GitHub setting or production data is changed. The non-required

@@ -40,6 +40,7 @@ export interface GenerationHost {
   busy: () => boolean;
   online: () => boolean;
   repairDeadline?: number;
+  scheduleRepairDeadline?: (callback: () => void, milliseconds: number) => () => void;
 }
 export interface WorkerInventory extends Entry {
   worker: string;
@@ -72,7 +73,14 @@ export interface StaticStatus {
 type Reserve = Extract<RecordBody, { kind: 'reserve' }>;
 type Deliver = Extract<RecordBody, { kind: 'deliver' }>;
 type Attempt = Extract<RecordBody, { kind: 'attempt' }>;
+type TerminalDecision = Readonly<
+  Pick<Extract<RecordBody, { kind: 'finish' }>, 'outcome' | 'completion'>
+>;
+type RepairFlight = { controller: AbortController; decision: TerminalDecision | null };
 const repairLock = LOCK + '-repair';
+// Only these worker-owned identities confer cancellation/deadline meaning.
+const cancellationReason = Symbol('authorized repair cancellation');
+const deadlineReason = Symbol('repair deadline');
 
 // Every mutation uses the same origin-wide Web Lock, including install/cutover,
 // staging, selection, document ownership, evidence, and deletion seals. No local fallback.
@@ -88,7 +96,7 @@ export class Generations {
   private sawLedger = false;
   private epoch: string | null = null;
   private startupEpoch: string | null = null;
-  private controllers = new Map<string, AbortController>();
+  private controllers = new Map<string, RepairFlight>();
   constructor(
     readonly host: GenerationHost,
     inventory: WorkerInventory[],
@@ -1282,7 +1290,9 @@ export class Generations {
             s.epoch !== d.epoch
           )
             return;
-          for (const [attempt, controller] of this.controllers) {
+          for (const [attempt, flight] of this.controllers) {
+            const { controller } = flight;
+            if (controller.signal.aborted || flight.decision) continue;
             const a = s.records.get(attempt);
             if (a?.kind === 'attempt' && a.binding === b.id) {
               if ([...s.records.values()].some((v) => 'request' in v && v.request === d.request))
@@ -1293,7 +1303,10 @@ export class Generations {
                 request: d.request as string,
                 attempt,
               });
-              controller.abort(new DOMException('Cancelled', 'AbortError'));
+              // Authorization can yield through persistence/read-back. Priority
+              // starts at the actual first abort, never at message arrival/put.
+              if (!controller.signal.aborted && !flight.decision)
+                controller.abort(cancellationReason);
             }
           }
         });
@@ -1313,9 +1326,15 @@ export class Generations {
         if (!lock) return { ...(await this.status(client)), repair: 'busy' };
         let attempt: Stored | null = null;
         let reservation: Stored | null = null;
-        let timed = false;
         const controller = new AbortController();
-        let timer: ReturnType<typeof setTimeout> | undefined;
+        const flight: RepairFlight = { controller, decision: null };
+        let disarm: (() => void) | undefined;
+        let uncertain = false;
+        const select = (decision: TerminalDecision) => {
+          flight.decision ??= Object.freeze(decision);
+          disarm?.();
+          return flight.decision;
+        };
         try {
           const start = await this.run(async () => {
             const s = await this.refreshLegacy(await this.snapshot()),
@@ -1378,11 +1397,20 @@ export class Generations {
           if (!start || !attempt || !reservation) return this.status(client);
           const activeAttempt = attempt as Stored,
             activeReservation = reservation as Stored;
-          this.controllers.set(activeAttempt.id, controller);
-          timer = setTimeout(() => {
-            timed = true;
-            controller.abort(new DOMException('Deadline', 'TimeoutError'));
-          }, this.host.repairDeadline ?? 12000);
+          this.controllers.set(activeAttempt.id, flight);
+          const onDeadline = () => {
+            if (controller.signal.aborted || flight.decision) return;
+            controller.abort(deadlineReason);
+          };
+          if (this.host.scheduleRepairDeadline)
+            disarm = this.host.scheduleRepairDeadline(
+              onDeadline,
+              this.host.repairDeadline ?? 12000,
+            );
+          else {
+            const timer = setTimeout(onDeadline, this.host.repairDeadline ?? 12000);
+            disarm = () => clearTimeout(timer);
+          }
           const r = activeReservation.body as Reserve;
           let source: { cache: Cache; descriptor: Descriptor } | undefined;
           if (start.source) {
@@ -1400,15 +1428,28 @@ export class Generations {
           await this.run(async () => {
             const s = await this.snapshot();
             controller.signal.throwIfAborted();
+            const decision = select({ outcome: 'complete', completion: completion.id });
             await this.append(s, {
               kind: 'finish',
               attempt: activeAttempt.id,
-              outcome: 'complete',
-              completion: completion.id,
+              ...decision,
             });
           });
         } catch {
-          if (attempt)
+          // Freeze synchronously before any awaited lock/snapshot/persistence.
+          // A selected success whose persistence failed must never become failure.
+          const alreadySelected = flight.decision !== null;
+          const decision = select({
+            outcome:
+              controller.signal.reason === cancellationReason
+                ? 'cancelled'
+                : controller.signal.reason === deadlineReason
+                  ? 'timed-out'
+                  : 'failed',
+            completion: null,
+          });
+          if (alreadySelected) uncertain = true;
+          else if (attempt)
             try {
               await this.run(async () => {
                 const s = await this.snapshot();
@@ -1421,18 +1462,21 @@ export class Generations {
                 await this.append(s, {
                   kind: 'finish',
                   attempt: (attempt as Stored).id,
-                  outcome: timed ? 'timed-out' : controller.signal.aborted ? 'cancelled' : 'failed',
-                  completion: null,
+                  ...decision,
                 });
               });
             } catch {
+              uncertain = true;
               /* No durable outcome means unknown/interrupted, never invented failure. */
             }
         } finally {
-          if (timer) clearTimeout(timer);
+          disarm?.();
           if (attempt) this.controllers.delete((attempt as Stored).id);
         }
-        return this.status(client);
+        const status = await this.status(client);
+        // This operation could not validate its finish. Only a later independent
+        // STATUS/restart may resolve a possibly successful write/read-back.
+        return uncertain ? { ...status, repair: 'unknown' as const } : status;
       },
     );
   }

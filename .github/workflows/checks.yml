@@ -41,6 +41,8 @@ jobs:
         run: pnpm lint
       - name: Types
         run: pnpm typecheck
+      - name: Deterministic repair ordering (10 repetitions, ordinary and constrained)
+        run: pnpm test:repair
       - name: Unit and component tests
         run: pnpm test:unit
       - name: Invalid configuration checks
