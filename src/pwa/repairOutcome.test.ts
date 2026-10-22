@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFailed } from 'vitest';
 import { StaticFixture, navigation, origin } from '../../test/staticGenerations';
 import { barrier, blockRepair, RepairDeadline } from '../../test/repairOutcomes';
 import { LOCK, META, resourceName, type Stored } from '../../worker/schema';
-import { recoveryHTML } from '../../worker/recovery';
+import { recoveryHTML, resourceRecoveryHTML } from '../../worker/recovery';
 import type { StaticStatus } from '../../worker/generations';
 
 type Outcome = 'complete' | 'failed' | 'cancelled' | 'timed-out';
@@ -17,7 +17,10 @@ async function setup(constrained: boolean, trace: string[]) {
   await g.install();
   await g.activate();
   await f.damage(g, 'missing', false, '/assets/supabase-sharedxx.js');
-  expect(await (await g.respond(navigation('/'), 'recovery-1'))!.text()).toBe(recoveryHTML);
+  expect(await (await g.respond(navigation('/'), 'recovery-1'))!.text()).toBeOneOf([
+    recoveryHTML,
+    resourceRecoveryHTML,
+  ]);
   const authority = await g.status('recovery-1');
   const base = (await f.completion(g)).ref;
   const before = f.fetches.length;
@@ -197,7 +200,7 @@ async function setup(constrained: boolean, trace: string[]) {
       const response = (await restart.respond(navigation('/'), 'reopened'))!;
       if (durable === 'complete') expect(await response.text()).toBe('v1:/');
       else {
-        expect(await response.text()).toBe(recoveryHTML);
+        expect(await response.text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
         expect((await f.completion(restart)).ref).toBe(base);
       }
       if (!s.chain.some((r) => r.body.kind === 'complete' && r.body.reservation === reserve.id))

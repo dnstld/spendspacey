@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
@@ -37,15 +37,40 @@ async function mount(locale: 'en' | 'pt-BR' = 'en', overrides: Partial<AuthConte
     ...overrides,
   };
   const i18n = await initializeI18n(createInstance(), locale);
-  return render(
+  const view = render(
     <I18nextProvider i18n={i18n}>
       <AuthContext value={value}>
         <PwaFeedback />
       </AuthContext>
     </I18nextProvider>,
   );
+  return { ...view, i18n };
 }
 describe('localized static preparation and recovery feedback', () => {
+  it('renders accessible English and Brazilian Portuguese waiting guidance after language change without navigation', async () => {
+    mock.state.waiting = true;
+    mock.state.recovery = false;
+    const href = location.href;
+    try {
+      const { i18n } = await mount('en');
+      const english = screen.getByText(
+        'An update is ready. Close all Spendspacey windows, then reopen the app to use it.',
+      );
+      expect(english).toBeVisible();
+      expect(english.closest('[aria-live="polite"]')).not.toBeNull();
+      await act(() => i18n.changeLanguage('pt-BR'));
+      const portuguese = screen.getByText(
+        'Uma atualização está pronta. Feche todas as janelas do Spendspacey e abra o aplicativo novamente para usá-la.',
+      );
+      expect(portuguese).toBeVisible();
+      expect(portuguese.closest('[aria-live="polite"]')).not.toBeNull();
+      expect(location.href).toBe(href);
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    } finally {
+      mock.state.waiting = false;
+      mock.state.recovery = true;
+    }
+  });
   it.each(['en', 'pt-BR'] as const)(
     'distinguishes preparation from control and shows reload/reopen guidance in %s',
     async (locale) => {

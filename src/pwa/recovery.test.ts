@@ -5,7 +5,16 @@ import { recoveryScript } from '../../worker/recovery';
 async function page(
   locale: string | null,
   repair: string,
-  options: { languages?: string[]; denied?: boolean; binding?: boolean; badReply?: boolean } = {},
+  options: {
+    languages?: string[];
+    denied?: boolean;
+    binding?: boolean;
+    badReply?: boolean;
+    controller?: boolean;
+    hold?: boolean;
+    intact?: boolean;
+    resourceLoss?: boolean;
+  } = {},
 ) {
   const elements = new Map<
     string,
@@ -30,7 +39,7 @@ async function page(
   let sequence = 0;
   const document = {
     title: '',
-    documentElement: { lang: '' },
+    documentElement: { lang: '', getAttribute: () => (options.resourceLoss ? 'verified' : null) },
     getElementById: (id: string) => {
       const e = elements.get(id)!;
       return Object.assign(e, {
@@ -38,29 +47,39 @@ async function page(
       });
     },
   };
+  let held = options.hold;
+  const replies: (() => void)[] = [];
+  const controllerEvents = new Map<string, () => void>();
   const worker = {
     postMessage: (
       message: Record<string, unknown>,
       ports: { postMessage: (v: unknown) => void }[],
     ) => {
       requests.push(message);
-      ports[0].postMessage({
-        protocol: 3,
-        operation: message.operation,
-        request: options.badReply ? 'forged' : message.request,
-        status: {
-          authority: options.binding === false ? 'none' : 'recovery',
-          worker: 'a'.repeat(64),
-          epoch: '12345678-1234-1234-1234-123456789012',
-          binding: options.binding === false ? null : 'b'.repeat(64),
-          generation: null,
-          prepared: false,
-          ready: false,
-          pending: repair === 'complete',
-          repair,
-        },
-      });
+      const reply = () =>
+        ports[0].postMessage({
+          protocol: 3,
+          operation: message.operation,
+          request: options.badReply ? 'forged' : message.request,
+          status: {
+            authority: options.binding === false ? 'none' : 'recovery',
+            worker: 'a'.repeat(64),
+            epoch: '12345678-1234-1234-1234-123456789012',
+            binding: options.binding === false ? null : 'b'.repeat(64),
+            generation: null,
+            prepared: options.intact === true,
+            ready: false,
+            pending: repair === 'complete',
+            repair,
+          },
+        });
+      if (held) replies.push(reply);
+      else reply();
     },
+  };
+  const serviceWorker = {
+    controller: options.controller === false ? (null as typeof worker | null) : worker,
+    addEventListener: (name: string, fn: () => void) => controllerEvents.set(name, fn),
   };
   class Channel {
     port1: { onmessage: ((e: { data: unknown }) => void) | null; close: () => void } = {
@@ -79,7 +98,7 @@ async function page(
       onLine: repair !== 'offline',
       languages: options.languages ?? ['en-US'],
       language: 'en-US',
-      serviceWorker: { controller: worker },
+      serviceWorker,
     },
     localStorage: {
       getItem: (key: string) => {
@@ -106,7 +125,26 @@ async function page(
     importScripts: network,
   });
   await new Promise((r) => setTimeout(r, 0));
-  return { document, elements, requests, reads, writes, reload, network, timers };
+  return {
+    document,
+    elements,
+    requests,
+    reads,
+    writes,
+    reload,
+    network,
+    timers,
+    serviceWorker,
+    worker,
+    controllerEvents,
+    replies,
+    hold: () => {
+      held = true;
+    },
+    release: () => {
+      held = false;
+    },
+  };
 }
 describe('embedded recovery fixed localization and message rendering', () => {
   for (const locale of ['en', 'pt-BR'])
@@ -189,4 +227,123 @@ it('metadata unavailability returns explicit recovery guidance and no confirmati
   expect(p.elements.get('status')!.textContent).toContain('cannot safely access its saved state');
   expect(p.elements.get('repair')!.disabled).toBe(true);
   expect(p.requests.map((r) => r.operation)).toEqual(['HELLO']);
+});
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
+describe('current-controller recovery handshake', () => {
+  it('delayed controller is acquired on deliberate status, without automatic repair', async () => {
+    const p = await page('en', 'idle', { controller: false });
+    expect(p.requests).toHaveLength(0);
+    p.serviceWorker.controller = p.worker;
+    p.controllerEvents.get('controllerchange')!();
+    expect(p.elements.get('repair')!.disabled).toBe(true);
+    p.elements.get('check')!.listeners.get('click')!();
+    await settle();
+    expect(p.requests.map((r) => r.operation)).toEqual(['HELLO', 'STATUS']);
+    expect(p.elements.get('repair')!.disabled).toBe(false);
+    expect(p.network).not.toHaveBeenCalled();
+    expect(p.reload).not.toHaveBeenCalled();
+  });
+  it('obsolete replies cannot revive correlation after controller change', async () => {
+    const p = await page('en', 'idle', { hold: true });
+    p.serviceWorker.controller = { ...p.worker };
+    p.controllerEvents.get('controllerchange')!();
+    p.replies.shift()!();
+    await settle();
+    expect(p.elements.get('repair')!.disabled).toBe(true);
+    expect(p.requests.map((r) => r.operation)).toEqual(['HELLO']);
+    p.release();
+    p.elements.get('check')!.listeners.get('click')!();
+    await settle();
+    expect(p.elements.get('repair')!.disabled).toBe(false);
+    expect(p.requests.some((r) => r.operation === 'REPAIR' || r.operation === 'CANCEL')).toBe(
+      false,
+    );
+  });
+  it('every deliberate repair/cancel gets a fresh HELLO, never replayed to a replacement controller', async () => {
+    const p = await page('en', 'failed');
+    p.elements.get('repair')!.listeners.get('click')!();
+    await settle();
+    expect(p.requests.map((r) => r.operation)).toEqual(['HELLO', 'CONFIRM', 'HELLO', 'REPAIR']);
+    p.serviceWorker.controller = { ...p.worker };
+    p.controllerEvents.get('controllerchange')!();
+    p.elements.get('repair')!.listeners.get('click')!();
+    await settle();
+    expect(p.requests.filter((r) => r.operation === 'REPAIR')).toHaveLength(1);
+    expect(p.elements.get('repair')!.disabled).toBe(true);
+  });
+  it('missing reply times out without unlocking repair or reloading', async () => {
+    const p = await page('en', 'idle', { hold: true });
+    for (const callback of [...p.timers.values()]) callback();
+    await settle();
+    expect(p.elements.get('repair')!.disabled).toBe(true);
+    expect(p.reload).not.toHaveBeenCalled();
+    expect(p.network).not.toHaveBeenCalled();
+  });
+  it.each(['en', 'pt-BR'])(
+    'intact but unbound recovery is truthful and stays unauthorized in %s',
+    async (locale) => {
+      const p = await page(locale, 'idle', { binding: false, intact: true });
+      expect(p.elements.get('intro')!.textContent).toBe(
+        locale === 'en'
+          ? 'Spendspacey cannot currently verify a usable saved application. This recovery page does not sign in or load your account.'
+          : 'O Spendspacey não pode verificar um aplicativo salvo utilizável no momento. Esta página de recuperação não faz login nem carrega sua conta.',
+      );
+      expect(p.elements.get('status')!.textContent).toBe(
+        locale === 'en'
+          ? 'This page has no verified document binding. Saved files may still be intact. Repair is unavailable. Reload or reopen Spendspacey to create a new document.'
+          : 'Esta página não tem um vínculo de documento verificado. Os arquivos salvos ainda podem estar intactos. O reparo está indisponível. Recarregue ou reabra o Spendspacey para criar um novo documento.',
+      );
+      expect(p.elements.get('repair')!.disabled).toBe(true);
+      expect(p.elements.get('cancel')!.disabled).toBe(true);
+      expect(p.reads).toEqual(['spendspacey.locale']);
+      expect(p.writes).toEqual([]);
+      p.elements.get('check')!.listeners.get('click')!();
+      await settle();
+      expect(p.elements.get('repair')!.disabled).toBe(true);
+      expect(p.requests.every((r) => r.operation === 'HELLO')).toBe(true);
+    },
+  );
+});
+
+it.each(['en', 'pt-BR'])(
+  'proven resource-loss copy is distinct from unbound/activation guidance in %s',
+  async (locale) => {
+    const p = await page(locale, 'idle', { resourceLoss: true });
+    expect(p.elements.get('intro')!.textContent).toBe(
+      locale === 'en'
+        ? 'This document opened because required saved application files were missing or corrupt. This recovery page does not sign in or load your account.'
+        : 'Este documento foi aberto porque arquivos salvos necessários estavam ausentes ou corrompidos. Esta página de recuperação não faz login nem carrega sua conta.',
+    );
+  },
+);
+
+it.each(['repair', 'cancel'])(
+  'controller change during fresh %s handshake never replays mutation',
+  async (operation) => {
+    const p = await page('en', operation === 'cancel' ? 'busy' : 'failed');
+    p.hold();
+    p.elements.get(operation)!.listeners.get('click')!();
+    await settle();
+    expect(p.elements.get('repair')!.disabled).toBe(true);
+    p.serviceWorker.controller = { ...p.worker };
+    p.controllerEvents.get('controllerchange')!();
+    p.replies.shift()!();
+    await settle();
+    expect(p.requests.some((r) => r.operation === 'REPAIR' || r.operation === 'CANCEL')).toBe(
+      false,
+    );
+    expect(p.elements.get('repair')!.disabled).toBe(true);
+    expect(p.elements.get('cancel')!.disabled).toBe(true);
+  },
+);
+it('missing fresh handshake disarms previously valid repair authority', async () => {
+  const p = await page('en', 'failed');
+  p.hold();
+  p.elements.get('repair')!.listeners.get('click')!();
+  await settle();
+  for (const callback of [...p.timers.values()]) callback();
+  await settle();
+  expect(p.elements.get('repair')!.disabled).toBe(true);
+  expect(p.requests.some((r) => r.operation === 'REPAIR')).toBe(false);
 });

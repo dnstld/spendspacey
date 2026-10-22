@@ -1,3 +1,78 @@
+# Restart-resumable activation correction (2026-10-22)
+
+Base: `611994f4e0cae15b4b4ef4ada6659d10ac059a55`. This implementation branch
+preserves main-derived **6/9** with Tasks **3.2–3.4 unchecked**. It imports no
+production/phone acceptance results from the separate dirty acceptance checkout.
+The interrupted-activation defect is reproduced in disposable contexts and is the
+leading hypothesis, not proof of the physical phone's exact trigger. The phone
+remains untouched; no production deployment or rollback is authorized.
+
+The [Service Worker activation algorithm](https://www.w3.org/TR/service-workers/#activation-algorithm)
+allows browser activation despite unsuccessful handlers. Native running-instance
+proof compares `self.serviceWorker === self.registration.active` plus lifecycle
+state. Real Chromium and supplemental disposable WebKit 27.2 report false during
+install, true while activating and true after activation. WebKit 27.2 evidence does
+not establish support on the untouched physical iOS/Chrome versions.
+
+`activation.test.ts` covers write rejection, persisted-but-unacknowledged writes,
+read-back/lineage interruption, restart without activate, same-global resumption,
+repeated/concurrent reconciliation, navigation/status/cleanup, missing completion,
+waiting/stale/superseded/ambiguous candidates, repeated build identity, compatible
+rollback, identical assets/different workers, corrupt/forked/incompatible/unsupported
+metadata, predecessor pins and repair/adoption history. `pnpm test:activation` runs
+the complete activation matrix ten times under ordinary and constrained execution;
+no retries are used. Existing deterministic repair ordering remains separately
+required, with ten repetitions and both scheduling modes.
+
+The Chromium PWA suite injects faults only into disposable worker activation-record
+writes. It observes intact-but-unbound recovery before permitting persistence, then
+verifies same-global, worker restart and persistent-profile browser restart. A
+separate transition uses an actual archived build of corrected main `611994f` to
+strand the predecessor ledger, then normally installs the corrected worker while
+the recovery document stays open. The old recovery CSP rejects script-initiated `registration.update()`; the successful
+regression uses ordinary navigation-triggered browser soft update. No CSP relaxation,
+unregister, site-data clearing or reinstall is used. Bilingual offline reload, immutable old pins, no repair attempts/seals,
+and no external/private requests are checked after adoption.
+
+Recovery tests cover delayed/replaced controllers, missing/obsolete replies, fresh
+handshake before deliberate interactions, no replay, exact English/Portuguese
+unbound guidance and proven-resource-loss copy, only locale storage access, zero
+fetch/import/Auth execution and no forced reload. Resource-loss copy is selected
+only from successful checks proving missing/corrupt files; storage exceptions,
+activation/binding unavailability and intact unbound resources use neutral copy.
+Both responses contain only fixed build-owned HTML and the same exact CSP hashes;
+no schema/protocol migration or private payload is added.
+
+Rendered waiting guidance is asserted exactly in English and after changing to
+Brazilian Portuguese, inside the intended polite live region. Existing waiting
+worker, retention and no-forced-reload tests remain required. The physical-device
+contract below permits `not observed` and unavailable physical reload without
+misrepresenting either as a pass.
+
+Local final verification passed with Node 24.21.0 / pnpm 10.27.0:
+
+| Verification                                    | Result                                                                                                                                                   |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full unit/component suite                       | 563/563, 22 files                                                                                                                                        |
+| Activation interruption/concurrency             | 23 cases × 10 repetitions × 2 execution modes = 460 executions                                                                                           |
+| Deterministic first-effective repair ordering   | 80 cases × 10 repetitions = 800 executions, both scheduling modes                                                                                        |
+| Full Chromium/origin/PWA suite                  | 61/61, retries 0; includes actual-611994f stranded-installation update                                                                                   |
+| Supplemental disposable WebKit                  | 27.2: native identity/timing, actual preparation and controlled navigation; zero external requests                                                       |
+| Formatting, lint, application/worker types      | Passed                                                                                                                                                   |
+| Configuration rejection                         | Passed, including 46 unsafe URL/Pages metadata variants                                                                                                  |
+| Build/delivery                                  | Local test plus production/preview/unclassified Pages variants passed; manifest/icons, exact 11-resource inventory/integrity, routing/headers/CSP passed |
+| Recovery/update/repair/rollback/cutover/cleanup | Passed in mapped deterministic/component/browser suites; no physical-device pass inferred                                                                |
+| Secret scan                                     | Proposed source inventory, all local/Pages artifacts and Git history passed                                                                              |
+| Strict OpenSpec / whitespace                    | 7/7 items; `git diff --check` passed                                                                                                                     |
+
+CI and deployed-preview results belong to the implementation draft PR's exact-head
+checks and review report. A preview check is authorized only after the local gates
+above; preview authentication must remain denied. No production deployment,
+rollback or physical-phone action is authorized. The historical evidence below
+remains historical, not evidence for this release.
+
+---
+
 # Installable offline shell verification
 
 ## Deterministic repair-outcome correction (2026-10-21)
@@ -262,7 +337,7 @@ Exact remaining unchecked tasks:
 
 - [ ] 3.2 After review/CI and the accepted merge to `main`, publish through the existing Pages GitHub integration at the predecessor's production origin. Verify actual worker/manifest bytes/MIME, root scope, revalidation, native SPA fallback without top-level `404.html` or catch-all rewrites, callback no-store/no-referrer, and CSP compatibility. Check required assets exist and reject fallback HTML as a valid worker/chunk; do not require arbitrary missing paths to return 404 or add Cloudflare runtime/storage products. Record version/URL/header outcomes without claiming local preview proves host behavior.
 - [ ] 3.3 Have the PM record the iPhone model and tested iOS/Google Chrome versions, open the production Pages URL in Chrome, use Share → Add to Home Screen, confirm the Spendspacey name/intended icon, and launch from the Home Screen. Verify standalone web-app presentation rather than an ordinary browser bookmark/tab. From that installed app, complete online sign-in/identity/sign-out, reach static readiness, and verify airplane-mode reload and full close/reopen, both languages, safe areas, touch controls, avatar fallbacks, and reconnect guidance. Record sanitized versions/URL/revision/pass-fail evidence; desktop Chromium cannot replace this manual PM gate and Safari-specific manual acceptance is not required.
-- [ ] 3.4 Publish a compatible accepted replacement merged into `main`, or identify a previously accepted complete production replacement, at that same origin and verify the waiting notice plus close-all-windows/reopen transition in the same installed iPhone Home Screen app added through Chrome; verify worker-aware recovery/rollback against complete builds. Record tested iOS/Chrome versions and sanitized update evidence without adding any application data feature.
+- [ ] 3.4 Complete the PM-only observable lifecycle acceptance using the combined evidence contract below; separately authorize compatible production rollback/restoration. Do not claim representative internal/fault tests as physical-device passes.
 
 PR #4 was merged at the correction baseline. The change remains unarchived and later changes planning-only.
 Production publication, iPhone installation/offline acceptance and installed-iPhone
@@ -272,3 +347,9 @@ orphan `Workers Builds: spendspacey` trigger remains untouched. No profile acces
 transaction/CRUD, migration, private storage, queue/outbox or runtime infrastructure
 is introduced. There is no approved-scope deviation; conservative indefinite
 retention and fail-closed legacy/unprovable documents are explicit limitations.
+
+## Task 3.4 evidence contract
+
+Physical Task 3.4 covers only PM-observed behavior in the same Home Screen installation: waiting notice if observable, usable existing document, close-all/reopen adoption, online use, complete offline close-all/cold reopen in English and Brazilian Portuguese, and absence of unexpected retry, forced reload or installation loss. Test an available safe normal reload control normally. If none exists, record physical reload as `unavailable/not tested`, never passed; combine bilingual physical offline cold-reopen evidence with the separate mapped automated/browser reload evidence. A waiting notice `not observed` does not alone block acceptance after rendered bilingual notice, waiting-worker and retention evidence pass. A broken notice, forced navigation/reload, unusable UI or lost installation is a failure requiring investigation.
+
+Fault injection, exact generation/controller ownership, repair ordering, failed/offline/successful repair, staging isolation and repaired-file adoption are **not manually executed on the physical iPhone; covered by representative automated/hosted evidence**. The product guarantees remain unchanged; only these subcases' evidence source changes. No phone developer tooling, cache mutation, cookies/tokens/sessions/account-storage inspection, callback inputs, API responses or private-data inspection/export is permitted. Compatible production rollback/restoration require separate explicit authorization and exact release verification outside the phone. Neither deployment nor phone interaction is authorized by this implementation.

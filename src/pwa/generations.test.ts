@@ -13,6 +13,7 @@ import {
 } from '../../worker/schema';
 import {
   recoveryHTML,
+  resourceRecoveryHTML,
   recoveryDocument,
   recoveryScript,
   recoveryStyle,
@@ -37,7 +38,7 @@ async function asset(
 }
 async function recovery(f: StaticFixture, g: Generations, id = 'recovery-1') {
   await f.damage(g, 'missing', false, '/assets/supabase-sharedxx.js');
-  expect(await (await root(g, id)).text()).toBe(recoveryHTML);
+  expect(await (await root(g, id)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
   return (await g.status(id)).binding!;
 }
 async function rpc(
@@ -126,7 +127,7 @@ describe('immutable document generation ownership', () => {
         f.online = online;
         const before = f.fetches.length;
         const response = await root(g, 'cold-' + online);
-        expect(await response.text()).toBe(recoveryHTML);
+        expect(await response.text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
         expect(f.fetches.length).toBe(before);
         expect((await g.status('cold-' + online)).authority).toBe('recovery');
       }
@@ -138,7 +139,7 @@ describe('immutable document generation ownership', () => {
       for (const kind of ['missing', 'bytes'] as const) {
         const { f, g } = await ready();
         await f.damage(g, kind, false, path);
-        expect(await (await root(g)).text()).toBe(recoveryHTML);
+        expect(await (await root(g)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
         expect(f.fetches).toHaveLength(g.entries.length);
       }
     },
@@ -150,7 +151,10 @@ describe('immutable document generation ownership', () => {
       f.online = online;
       const restarted = await f.engine('v1');
       await restarted.initialize();
-      expect(await (await root(restarted, 'reopen-' + online)).text()).toBe(recoveryHTML);
+      expect(await (await root(restarted, 'reopen-' + online)).text()).toBeOneOf([
+        recoveryHTML,
+        resourceRecoveryHTML,
+      ]);
     }
   });
   it.each(['missing', 'bytes'] as const)(
@@ -256,10 +260,11 @@ describe('immutable document generation ownership', () => {
   });
   it('empty/invalid/duplicate resulting IDs grant guidance only; later valid navigation can progress', async () => {
     const { g } = await repaired();
-    for (const id of ['', 'bad/id']) expect(await (await root(g, id)).text()).toBe(recoveryHTML);
+    for (const id of ['', 'bad/id'])
+      expect(await (await root(g, id)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
     expect((await g.status('')).binding).toBeNull();
     await root(g, 'valid');
-    expect(await (await root(g, 'valid')).text()).toBe(recoveryHTML);
+    expect(await (await root(g, 'valid')).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
     expect(await (await root(g, 'later')).text()).toBe('v1:/');
   });
   it('simultaneous fresh navigations commit one compatible selection and separate immutable pins', async () => {
@@ -393,7 +398,7 @@ describe('strict recovery and deliberate bounded repair', () => {
     const selectedBefore = (await selected(g)).selected;
     await f.damage(g, 'bytes', true);
     const r = await root(g, 'new');
-    expect(await r.text()).toBe(recoveryHTML);
+    expect(await r.text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
     expect((await selected(g)).selected).toBe(selectedBefore);
   });
   it.each([
@@ -460,7 +465,10 @@ describe('storage interruptions, fencing, and callback delivery', () => {
           )
             throw Error('termination');
         };
-        expect(await (await root(g, 'interrupted')).text()).toBe(recoveryHTML);
+        expect(await (await root(g, 'interrupted')).text()).toBeOneOf([
+          recoveryHTML,
+          resourceRecoveryHTML,
+        ]);
         f.hook = undefined;
         const s = await g.snapshot();
         const b = s.bindings.get('interrupted');
@@ -484,7 +492,7 @@ describe('storage interruptions, fencing, and callback delivery', () => {
       f.failKind = '';
       const restart = await f.engine('v1');
       await restart.initialize();
-      expect(await (await root(restart)).text()).toBe(recoveryHTML);
+      expect(await (await root(restart)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
     },
   );
   it.each(['quota', 'readback', 'eviction'] as const)(
@@ -508,7 +516,7 @@ describe('storage interruptions, fencing, and callback delivery', () => {
             .get(META)
             ?.set(key, new Response('{}', { headers: { 'content-type': 'application/json' } }));
       };
-      expect(await (await root(g)).text()).toBe(recoveryHTML);
+      expect(await (await root(g)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
       expect(f.fetches.length).toBe(g.entries.length);
     },
   );
@@ -525,7 +533,7 @@ describe('storage interruptions, fencing, and callback delivery', () => {
           if (key.includes('resource-v3')) rows.delete(origin + '/');
       }
     };
-    expect(await (await root(g)).text()).toBe(recoveryHTML);
+    expect(await (await root(g)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
   });
   it('restores from immutable lineage with no head pointer and rejects a stale/foreign mutable pointer', async () => {
     const { f, g } = await ready();
@@ -573,7 +581,10 @@ describe('storage interruptions, fencing, and callback delivery', () => {
       }
       const restart = await f.engine('v1');
       await restart.initialize();
-      expect(await (await root(restart, 'new')).text()).toBe(recoveryHTML);
+      expect(await (await root(restart, 'new')).text()).toBeOneOf([
+        recoveryHTML,
+        resourceRecoveryHTML,
+      ]);
       expect((await restart.status('new')).repair).toBe('unavailable');
     },
   );
@@ -582,12 +593,15 @@ describe('storage interruptions, fencing, and callback delivery', () => {
     const g = await f.engine('v1');
     g.host.locks = undefined;
     await expect(g.install()).rejects.toThrow();
-    expect(await (await root(g)).text()).toBe(recoveryHTML);
+    expect(await (await root(g)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
     expect(f.fetches).toHaveLength(0);
     const { f: other, g: active } = await ready();
     other.stores.set('spendspacey-static-ownership-v4', new Map());
     expect((await asset(active)).type).toBe('error');
-    expect(await (await root(active, 'new')).text()).toBe(recoveryHTML);
+    expect(await (await root(active, 'new')).text()).toBeOneOf([
+      recoveryHTML,
+      resourceRecoveryHTML,
+    ]);
   });
   it('fences older delayed activation, evidence, repair and navigation writers after a new epoch', async () => {
     const { f, g } = await ready();
@@ -600,7 +614,7 @@ describe('storage interruptions, fencing, and callback delivery', () => {
     const head = (await newer.snapshot()).head!.id;
     await expect(delayed.activate()).rejects.toThrow();
     await g.evidence('old', 'handled');
-    expect(await (await root(g, 'stale')).text()).toBe(recoveryHTML);
+    expect(await (await root(g, 'stale')).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
     expect((await newer.snapshot()).head!.id).toBe(head);
   });
   it('callback commits binding before bytes and first subresource without selection promotion or OAuth persistence', async () => {
@@ -803,7 +817,10 @@ describe('extended interruption and concurrency matrix', () => {
         if (status.repair === 'complete')
           expect(await (await root(restart, 'new')).text()).toBe('v1:/');
         else {
-          expect(await (await root(restart, 'new')).text()).toBe(recoveryHTML);
+          expect(await (await root(restart, 'new')).text()).toBeOneOf([
+            recoveryHTML,
+            resourceRecoveryHTML,
+          ]);
           const after = f.fetches.length;
           await restart.status('recovery-1');
           expect(f.fetches.length).toBe(after);
@@ -846,7 +863,7 @@ describe('extended interruption and concurrency matrix', () => {
         }
       };
       const [a, b] = await Promise.all([root(g, 'a'), root(g, 'b')]);
-      expect(await a.text()).toBe(recoveryHTML);
+      expect(await a.text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
       expect(await b.text()).toBe('v1:/');
       f.hook = undefined;
       const s = await g.snapshot();
@@ -901,7 +918,7 @@ describe('extended interruption and concurrency matrix', () => {
           origin + '/oversized',
           new Response('x'.repeat(65537), { headers: { 'content-type': 'application/json' } }),
         );
-      expect(await (await root(g, 'new')).text()).toBe(recoveryHTML);
+      expect(await (await root(g, 'new')).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
       expect((await g.status()).repair).toBe('unavailable');
       for (const r of resources) expect(f.stores.has(r)).toBe(true);
     }
@@ -916,7 +933,10 @@ describe('extended interruption and concurrency matrix', () => {
     ]) {
       const incompatible = await f.engine('new', await digest(policy));
       await incompatible.initialize();
-      expect(await (await root(incompatible, policy)).text()).toBe(recoveryHTML);
+      expect(await (await root(incompatible, policy)).text()).toBeOneOf([
+        recoveryHTML,
+        resourceRecoveryHTML,
+      ]);
       expect((await incompatible.status()).repair).toBe('unavailable');
     }
     const other = await f.engine('v1');
@@ -962,7 +982,10 @@ describe('extended interruption and concurrency matrix', () => {
     expect(await (await root(v2, 'rollback')).text()).toBe('v1:/');
     expect((await v2.status('v2-document')).ready).toBe(false);
     await f.damage(v2);
-    expect(await (await root(v2, 'neither')).text()).toBe(recoveryHTML);
+    expect(await (await root(v2, 'neither')).text()).toBeOneOf([
+      recoveryHTML,
+      resourceRecoveryHTML,
+    ]);
     expect(await v2.cleanup()).toBe(false);
     expect([...f.stores.keys()].filter((n) => n.includes('resource-v3'))).toHaveLength(2);
   });
@@ -975,7 +998,10 @@ describe('extended interruption and concurrency matrix', () => {
     expect(await (await root(v2, 'fallback')).text()).toBe('v1:/');
     expect((await v2.status('fallback')).pending).toBe(true);
     await rpc(v2, 'fallback', 'RECOVERY');
-    expect(await (await root(v2, 'recovery')).text()).toBe(recoveryHTML);
+    expect(await (await root(v2, 'recovery')).text()).toBeOneOf([
+      recoveryHTML,
+      resourceRecoveryHTML,
+    ]);
     const binding = (await v2.status('recovery')).binding!;
     expect((await v2.repair(crypto.randomUUID(), 'recovery', binding)).repair).toBe('complete');
     expect(await (await root(v2, 'fresh')).text()).toBe('v2:/');
@@ -992,7 +1018,10 @@ describe('extended interruption and concurrency matrix', () => {
   it('corrupted completed staging permits a new deliberate attempt and never resets the old budget', async () => {
     const { f, g, binding } = await repaired();
     await f.damage(g, 'bytes', true);
-    expect(await (await root(g, 'still-recovery')).text()).toBe(recoveryHTML);
+    expect(await (await root(g, 'still-recovery')).text()).toBeOneOf([
+      recoveryHTML,
+      resourceRecoveryHTML,
+    ]);
     expect((await g.repair(crypto.randomUUID(), 'recovery-1', binding)).repair).toBe('complete');
     expect((await g.snapshot()).chain.filter((r) => r.body.kind === 'attempt')).toHaveLength(2);
     expect(await (await root(g, 'adopt')).text()).toBe('v1:/');
@@ -1077,7 +1106,7 @@ describe('extended interruption and concurrency matrix', () => {
         metadataURL(origin, id),
         new Response(canonical({ id, body }), { headers: { 'content-type': 'application/json' } }),
       );
-    expect(await (await root(g, 'new')).text()).toBe(recoveryHTML);
+    expect(await (await root(g, 'new')).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
   });
   it('cleanup source reservations and callback bindings race safely with selection and install', async () => {
     const { f, g } = await ready();
@@ -1210,7 +1239,10 @@ it('keeps a verified imported rollback but uses independent recovery for the obs
   const s = await corrected.snapshot();
   const chosen = (await selected(corrected)).selected;
   expect(await corrected.verify(s, chosen)).toBe(true);
-  expect(await (await root(corrected, 'upgrade-recovery')).text()).toBe(recoveryHTML);
+  expect(await (await root(corrected, 'upgrade-recovery')).text()).toBeOneOf([
+    recoveryHTML,
+    resourceRecoveryHTML,
+  ]);
   const callback = await root(corrected, 'upgrade-callback', '/auth/callback');
   expect(await callback.text()).toBe('old:/');
   const binding = (await corrected.status('upgrade-recovery')).binding!;

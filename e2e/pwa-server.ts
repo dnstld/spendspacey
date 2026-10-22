@@ -15,6 +15,7 @@ export async function pwaServer() {
   const state = {
     directory: 'dist',
     broken: false,
+    workerPrefix: '',
     redirectPath: '',
     delayPath: '',
     requests: [] as string[],
@@ -50,7 +51,9 @@ export async function pwaServer() {
         return;
       }
       async function send(file: string, response: ServerResponse) {
-        const bytes = await readFile(resolve(state.directory, file));
+        let bytes = await readFile(resolve(state.directory, file));
+        if (file === 'sw.js' && state.workerPrefix)
+          bytes = Buffer.concat([Buffer.from(state.workerPrefix), bytes]);
         const extension = file.slice(file.lastIndexOf('.'));
         response
           .writeHead(200, {
