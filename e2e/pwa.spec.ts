@@ -1,4 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from '@playwright/test';
 import { test, expect, type Page, type BrowserContext, type CDPSession } from '@playwright/test';
 import { pwaServer } from './pwa-server';
 import { syntheticSession } from '../test/session';
@@ -925,3 +929,181 @@ test('actual 069dbc50 worker installs, cuts over through normal waiting, imports
     await host.close();
   }
 });
+
+// Disposable instrumentation faults only the activation record. Resource bytes,
+// application policy and the actual compiled generation engine are unchanged.
+const interruptedActivation = `
+self.__activationFault = false;
+self.__identity = [];
+const identity = () => ({ supported: !!self.serviceWorker, active: !!self.serviceWorker && self.registration.active === self.serviceWorker, state: self.serviceWorker?.state });
+self.addEventListener('install', () => self.__identity.push({ event: 'install', ...identity() }));
+self.addEventListener('activate', () => { self.__activationFault = true; self.__identity.push({ event: 'activate', ...identity() }); });
+const put = Cache.prototype.put;
+Cache.prototype.put = async function(request, response) {
+  const path = new URL(typeof request === 'string' ? request : request.url, self.location.origin).pathname;
+  if (self.__activationFault && path.startsWith('/__spendspacey_ownership_v3__/')) {
+    const row = await response.clone().json();
+    if (row.body.kind === 'activate') { self.__faults = (self.__faults || 0) + 1; throw Error('synthetic activation interruption'); }
+  }
+  return put.call(this, request, response);
+};
+`;
+for (const mode of [
+  'same global',
+  'worker restart',
+  'persistent browser restart',
+  'stranded old implementation',
+]) {
+  test(`interrupted activation recovers on cold navigation: ${mode}`, async ({
+    context: defaultContext,
+  }) => {
+    test.setTimeout(90000);
+    const profile = await mkdtemp(join(tmpdir(), 'spendspacey-activation-'));
+    let context =
+      mode === 'persistent browser restart'
+        ? await chromium.launchPersistentContext(profile, { headless: true })
+        : defaultContext;
+    const host = await pwaServer();
+    host.state.directory = '.cache/installable-offline-shell/v1';
+    const outside: string[] = [];
+    const guard = async (c: BrowserContext) => {
+      await c.route('**/*', (route) => {
+        if (new URL(route.request().url()).origin !== host.origin) {
+          outside.push('unexpected external request');
+          return route.abort();
+        }
+        return route.continue();
+      });
+    };
+    try {
+      await guard(context);
+      const original = await context.newPage();
+      await prepared(original, host.origin);
+      const pin = (await message(original, 'STATUS')).binding;
+      host.state.directory =
+        mode === 'stranded old implementation'
+          ? '.cache/installable-offline-shell/baseline-611994f'
+          : '.cache/installable-offline-shell/v2';
+      host.state.workerPrefix = interruptedActivation;
+      await original.evaluate(async () => {
+        await (await navigator.serviceWorker.getRegistration())!.update();
+      });
+      await expect
+        .poll(async () =>
+          original.evaluate(
+            async () => !!(await navigator.serviceWorker.getRegistration())!.waiting,
+          ),
+        )
+        .toBe(true);
+      const replacement = context.serviceWorkers().at(-1)!;
+      await original.close();
+      await expect
+        .poll(() =>
+          replacement.evaluate(() => {
+            const s = self as unknown as {
+              __faults?: number;
+              registration: ServiceWorkerRegistration;
+            };
+            return !!s.__faults && s.registration.active?.state === 'activated';
+          }),
+        )
+        .toBe(true);
+      const timing = await replacement.evaluate(
+        () => (self as unknown as { __identity: unknown[] }).__identity,
+      );
+      expect(timing).toEqual([
+        { event: 'install', supported: true, active: false, state: 'installing' },
+        { event: 'activate', supported: true, active: true, state: 'activating' },
+      ]);
+      if (mode === 'stranded old implementation') {
+        const monitor = await context.newPage();
+        const cdp = await context.newCDPSession(monitor);
+        await cdp.send('ServiceWorker.enable');
+        await cdp.send('ServiceWorker.stopAllWorkers');
+        await monitor.close();
+      }
+      // Observe exact intact-but-unbound failure while persistence remains rejected.
+      const recovery = await context.newPage();
+      const response = await recovery.goto(host.origin);
+      expect(response!.fromServiceWorker()).toBe(true);
+      await expect(recovery.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+      await expect(recovery.getByRole('status')).toContainText(
+        mode === 'stranded old implementation'
+          ? 'no verified document binding'
+          : 'does not establish missing or corrupt files',
+      );
+      await expect(
+        recovery.getByRole('button', { name: 'Repair online', exact: true }),
+      ).toBeDisabled();
+      await expect(
+        recovery.getByRole('button', { name: 'Cancel repair', exact: true }),
+      ).toBeDisabled();
+      const unbound = await message(recovery, 'STATUS');
+      expect(unbound).toMatchObject({
+        prepared: true,
+        authority: 'none',
+        binding: null,
+        ready: false,
+      });
+      if (mode === 'stranded old implementation') {
+        host.state.directory = '.cache/installable-offline-shell/v2';
+        host.state.workerPrefix = '';
+        // The old recovery CSP intentionally forbids worker construction from
+        // its script. Use a normal browser navigation's soft update instead.
+        const probe = await context.newPage();
+        await probe.goto(host.origin);
+        await expect
+          .poll(() =>
+            recovery.evaluate(
+              async () => !!(await navigator.serviceWorker.getRegistration())!.waiting,
+            ),
+          )
+          .toBe(true);
+        await probe.close();
+        await expect(
+          recovery.getByRole('button', { name: 'Repair online', exact: true }),
+        ).toBeDisabled();
+      }
+      await recovery.close();
+      if (mode === 'same global') {
+        await replacement.evaluate(() => {
+          (self as unknown as { __activationFault: boolean }).__activationFault = false;
+        });
+      } else if (mode === 'worker restart') {
+        const monitor = await context.newPage();
+        const cdp = await context.newCDPSession(monitor);
+        await cdp.send('ServiceWorker.enable');
+        await cdp.send('ServiceWorker.stopAllWorkers');
+        await monitor.close();
+      } else if (mode === 'persistent browser restart') {
+        await context.close();
+        context = await chromium.launchPersistentContext(profile, { headless: true });
+        await guard(context);
+      }
+      const cold = await context.newPage();
+      await disableHttpCache(cold);
+      await cold.goto(host.origin);
+      await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+      await expect(cold.getByTestId('offline-readiness')).toContainText('ready for offline');
+      expect((await message(cold, 'STATUS')).ready).toBe(true);
+      const ledger = await records(cold);
+      expect(ledger.filter((r) => r.body.kind === 'activate')).toHaveLength(2);
+      expect(ledger.some((r) => r.id === pin)).toBe(true);
+      expect(ledger.some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal')).toBe(false);
+      for (const locale of ['en', 'pt-BR']) {
+        await cold.getByRole('combobox').selectOption(locale);
+        await setOffline(context, true);
+        await cold.reload();
+        await expect(cold.locator('html')).toHaveAttribute('lang', locale);
+        await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+        await setOffline(context, false);
+      }
+      expect(outside).toEqual([]);
+      expect(host.state.privateRequests).toBe(0);
+    } finally {
+      if (context !== defaultContext) await context.close();
+      await host.close();
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+}

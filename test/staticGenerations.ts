@@ -101,6 +101,7 @@ export class StaticFixture {
       windows: async () => this.windows,
       busy: () => this.busy,
       online: () => this.online,
+      active: () => true, // Explicit simulated browser authority; adversarial tests override.
       repairDeadline: this.deadline,
       fetch: async (request) => {
         this.fetches.push(request);

@@ -116,13 +116,13 @@ Completion SHALL require manual PM installation from Chrome on an iPhone and sta
 - **WHEN** automated checks pass and accepted changes merged into `main` are published at the existing production Pages URL
 - **THEN** the PM opens that URL in Google Chrome on the iPhone, uses Chrome's Share menu → Add to Home Screen, confirms the Spendspacey name/intended icon, and launches from the Home Screen
 - **AND** it opens as a standalone web app rather than an ordinary browser bookmark/tab
-- **AND** from the installed app the PM completes online sign-in/identity/sign-out checks, waits for static readiness, then refreshes and fully closes/reopens it in airplane mode
+- **AND** from the installed app the PM completes online sign-in/identity/sign-out checks, waits for static readiness, then tests an available safe reload control and fully closes/reopens it in airplane mode; unavailable physical reload uses the combined evidence contract below
 - **AND** the shell, English/Brazilian Portuguese controls, safe areas, touch controls, and avatar fallbacks remain usable
 - **AND** an unavailable session shows reconnect guidance rather than preventing shell launch or claiming fresh authentication
 
 #### Scenario: Phone update and acceptance are recorded
 - **WHEN** a compatible accepted production replacement from `main` is available at the same origin
-- **THEN** the PM verifies the waiting notice and safe close-all-windows/reopen update path in the installed iPhone Home Screen app
+- **THEN** the PM records the waiting notice if observable and verifies the safe close-all-windows/reopen update path in the installed iPhone Home Screen app
 - **AND** sanitized iPhone model, tested iOS and Chrome versions, deployed version, production URL, and manual PM pass/fail evidence is recorded without identity values or real-account traces
 - **AND** desktop Chromium evidence does not substitute for the actual installed-app online/offline checks; Safari-specific manual acceptance is not required
 - **AND** this change remains incomplete until actual installation/offline/update evidence passes
@@ -243,3 +243,32 @@ Repair SHALL preserve the first effective authorized stop decision while undecid
 - **AND** later STATUS or restart may validate an existing finish; a missing finish remains unknown even with persisted cancellation evidence
 - **AND** the repair lock remains held through settlement and final result determination, hangs retain the lock, and rejected persistence never replenishes the attempt
 - **AND** no automatic request starts, partial staging remains unselected, completed staging requires a validated successful finish for adoption, and incomplete-staging retention is unchanged
+
+### Requirement: Activation ownership resumes independently of lifecycle completion
+
+A browser-active worker SHALL resume interrupted ownership independently of activation-handler completion, using native instance authority, exclusive serialization and validated installation lineage. Committed ownership SHALL restore idempotently without reverting selections, bindings or repair history.
+
+#### Scenario: Browser activation survives failed persistence
+- **WHEN** activation persistence rejects or termination interrupts write/read-back/local restoration and the browser still activates the replacement
+- **THEN** a later functional event in the same or restarted global can reconcile the unique valid transfer without another activate event
+- **AND** it independently revalidates candidate and compatible predecessor, retains existing bindings and never mixes generations, repairs automatically or sweeps caches
+- **AND** the current parent/head, epoch, unique completed reservation and native active authority are validated before persistence; waiting/stale/superseded/ambiguous/corrupt/forked/incompatible candidates cannot claim ownership
+- **AND** repeated write failure remains bounded and unavailable; no unbound recovery document receives invented authority
+
+#### Scenario: Same-build installation cannot be identified
+- **WHEN** multiple eligible reservations exist or an unconsumed same-build reservation exists while that build already owns the ledger
+- **THEN** reconciliation fails closed without using an obsolete reservation or treating build identity as installation identity
+- **AND** existing schema/protocol and legacy/repair/cleanup history remain intact
+
+#### Scenario: Recovery controller changes or resources remain intact
+- **WHEN** the controller is absent, changes or returns a delayed/obsolete/missing reply
+- **THEN** recovery validates the current controller with a fresh handshake for deliberate interactions, discards stale correlation and never replays repair/cancellation
+- **AND** its bilingual copy does not claim missing/corrupt resources from activation or binding unavailability; repair requires validated recovery-document authority
+
+#### Scenario: Physical lifecycle uses bounded observable evidence
+- **WHEN** Task 3.4 is reviewed
+- **THEN** the following evidence-source contract applies without reducing the product's lifecycle, integrity or repair guarantees
+
+Physical Task 3.4 covers only PM-observed behavior in the same Home Screen installation: waiting notice if observable, usable existing document, close-all/reopen adoption, online use, complete offline close-all/cold reopen in English and Brazilian Portuguese, and absence of unexpected retry, forced reload or installation loss. Test an available safe normal reload control normally. If none exists, record physical reload as `unavailable/not tested`, never passed; combine bilingual physical offline cold-reopen evidence with the separate mapped automated/browser reload evidence. A waiting notice `not observed` does not alone block acceptance after rendered bilingual notice, waiting-worker and retention evidence pass. A broken notice, forced navigation/reload, unusable UI or lost installation is a failure requiring investigation.
+
+Fault injection, exact generation/controller ownership, repair ordering, failed/offline/successful repair, staging isolation and repaired-file adoption are **not manually executed on the physical iPhone; covered by representative automated/hosted evidence**. The product guarantees remain unchanged; only these subcases' evidence source changes. No phone developer tooling, cache mutation, cookies/tokens/sessions/account-storage inspection, callback inputs, API responses or private-data inspection/export is permitted. Compatible production rollback/restoration require separate explicit authorization and exact release verification outside the phone. Neither deployment nor phone interaction is authorized by this implementation.

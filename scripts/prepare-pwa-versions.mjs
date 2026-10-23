@@ -26,31 +26,39 @@ const { execFileSync } = await import('node:child_process');
 const { mkdtempSync, symlinkSync, rmSync } = await import('node:fs');
 const { tmpdir } = await import('node:os');
 const { resolve, join } = await import('node:path');
-const legacyRoot = mkdtempSync(join(tmpdir(), 'spendspacey-069dbc50-'));
-try {
-  const archive = execFileSync('git', ['archive', '069dbc50f4a34b76fefd2a3eb934388d452a8b5a'], {
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  execFileSync('tar', ['-x', '-C', legacyRoot], { input: archive });
-  symlinkSync(resolve('node_modules'), join(legacyRoot, 'node_modules'), 'dir');
-  await build({
-    root: legacyRoot,
-    configFile: join(legacyRoot, 'vite.config.ts'),
-    mode: 'development',
-    build: {
-      outDir: resolve('.cache/installable-offline-shell/legacy-069dbc50'),
-      emptyOutDir: true,
-    },
-    plugins: [
-      {
-        name: 'synthetic-legacy-version-marker',
-        transform(code, id) {
-          if (id.endsWith('/src/main.tsx'))
-            return code + "\ndocument.documentElement.dataset.syntheticVersion='legacy-069dbc50';";
-        },
+for (const [revision, label] of [
+  ['069dbc50f4a34b76fefd2a3eb934388d452a8b5a', 'legacy-069dbc50'],
+  ['611994f4e0cae15b4b4ef4ada6659d10ac059a55', 'baseline-611994f'],
+]) {
+  const legacyRoot = mkdtempSync(join(tmpdir(), 'spendspacey-version-'));
+  try {
+    const archive = execFileSync('git', ['archive', revision], {
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    execFileSync('tar', ['-x', '-C', legacyRoot], { input: archive });
+    symlinkSync(resolve('node_modules'), join(legacyRoot, 'node_modules'), 'dir');
+    await build({
+      root: legacyRoot,
+      configFile: join(legacyRoot, 'vite.config.ts'),
+      mode: 'development',
+      build: {
+        outDir: resolve('.cache/installable-offline-shell/' + label),
+        emptyOutDir: true,
       },
-    ],
-  });
-} finally {
-  rmSync(legacyRoot, { recursive: true, force: true });
+      plugins: [
+        {
+          name: 'synthetic-legacy-version-marker',
+          transform(code, id) {
+            if (id.endsWith('/src/main.tsx'))
+              return (
+                code +
+                `\ndocument.documentElement.dataset.syntheticVersion=${JSON.stringify(label)};`
+              );
+          },
+        },
+      ],
+    });
+  } finally {
+    rmSync(legacyRoot, { recursive: true, force: true });
+  }
 }

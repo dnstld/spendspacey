@@ -39,6 +39,8 @@ export interface GenerationHost {
   windows: () => Promise<readonly { id: string; url: string; visibilityState?: string }[]>;
   busy: () => boolean;
   online: () => boolean;
+  // Native running-instance proof; never a URL, build identity or page assertion.
+  active: () => boolean;
   repairDeadline?: number;
   scheduleRepairDeadline?: (callback: () => void, milliseconds: number) => () => void;
 }
@@ -162,7 +164,7 @@ export class Generations {
         this.epoch = s.owner === this.worker ? s.epoch : null;
         if ([...s.records.values()].some((r) => r.kind === 'cutover')) {
           await this.legacyHistory(s);
-          if (s.owner === this.worker) await this.refreshLegacy(s);
+          if (s.owner === this.worker && this.host.active()) await this.refreshLegacy(s);
         }
       } catch {
         this.unavailable = true;
@@ -561,9 +563,14 @@ export class Generations {
     }
     return p;
   }
-  private async append(s: Snapshot, op: Op, installing = false): Promise<Stored> {
+  private async append(
+    s: Snapshot,
+    op: Op,
+    installing = false,
+    authority?: () => boolean,
+  ): Promise<Stored> {
     if (this.unavailable) throw new Error('Unavailable ledger');
-    if (!installing && (s.owner !== this.worker || s.epoch !== this.epoch))
+    if (!installing && (!this.host.active() || s.owner !== this.worker || s.epoch !== this.epoch))
       throw new Error('Writer fenced');
     const now = await this.snapshot();
     if (now.head?.id !== s.head?.id || now.epoch !== s.epoch) throw new Error('Head changed');
@@ -583,6 +590,8 @@ export class Generations {
     const record = { id, body };
     await this.snapshot(record); // Validate the proposed transition before writing untrusted input.
     const cache = await this.host.caches.open(META);
+    if ((!installing && !this.host.active()) || (authority && !authority()))
+      throw new Error('Browser-active authority lost');
     await cache.put(
       metadataURL(this.host.origin, id),
       new Response(canonical(record), { headers: { 'content-type': 'application/json' } }),
@@ -626,6 +635,23 @@ export class Generations {
     } catch {
       return false;
     }
+  }
+  // Diagnostic only. Storage exceptions and invalid metadata do not prove loss.
+  private async resourceLoss(s: Snapshot, id: string | null): Promise<boolean> {
+    try {
+      if (!id) return false;
+      const r = this.resource(s, id);
+      const name = resourceName(r);
+      if (!(await this.host.caches.has(name))) return true;
+      const cache = await this.host.caches.open(name);
+      for (const entry of r.descriptor.entries) {
+        const response = await cache.match(this.host.origin + entry.key);
+        if (!response || !(await validResource(entry, response, this.host.origin))) return true;
+      }
+    } catch {
+      /* Unknown is not proven missing/corrupt. */
+    }
+    return false;
   }
   private async exact(s: Snapshot, id: string, path: string): Promise<Response> {
     const r = this.resource(s, id);
@@ -882,25 +908,54 @@ export class Generations {
     await this.fill(reservation.body as Reserve);
     await this.complete(reservation.id, reservation.body.epoch, true);
   }
+  unavailableResponse(request: Request): Promise<Response> | Response {
+    return routeRequest(request, this.host.origin, new Set([request.url])) === 'shell'
+      ? recoveryDocument()
+      : Response.error();
+  }
+  // Functional events retry once under the writer lock, not through a permanently
+  // rejected activate-event promise. No network, repair or cleanup is performed.
+  async reconcile(): Promise<boolean> {
+    try {
+      await this.activate();
+      return true;
+    } catch {
+      return false;
+    }
+  }
   async activate(): Promise<void> {
     await this.initialize();
     await this.run(async () => {
       if (this.unavailable) throw new Error('Initialization unavailable');
+      if (!this.host.active()) throw new Error('Not the browser-active worker');
       const s = await this.snapshot();
-      const install = [...s.records]
-        .filter(
-          ([, r]) =>
-            r.kind === 'reserve' &&
-            r.purpose === 'install' &&
-            r.worker === this.worker &&
-            r.epoch === s.epoch,
-        )
+      const eligible = [...s.records].filter(
+        ([id, r]) =>
+          r.kind === 'reserve' &&
+          r.purpose === 'install' &&
+          r.worker === this.worker &&
+          r.epoch === s.epoch &&
+          !s.chain.some((v) => v.body.kind === 'activate' && v.body.installation === id),
+      );
+      if (s.owner === this.worker) {
+        // Already committed: preserve later repair/adoption and all history. A
+        // same-build unconsumed installation cannot be identified across globals.
+        if (eligible.length) throw new Error('Ambiguous same-build installation');
+        if (!this.host.active()) throw new Error('Browser-active authority lost');
+        this.epoch = s.epoch;
+        return;
+      }
+      if (eligible.length !== 1) throw new Error('No unique fenced installation');
+      const install = eligible[0];
+      const latest = [...s.records]
+        .filter(([, r]) => r.kind === 'reserve' && r.purpose === 'install' && r.epoch === s.epoch)
         .at(-1);
-      if (!install) throw new Error('No fenced installation');
+      if (latest?.[0] !== install[0]) throw new Error('Superseded installation');
       const candidate =
         [...s.records].find(
           ([, r]) => r.kind === 'complete' && r.reservation === install[0],
         )?.[0] ?? null;
+      if (!candidate) throw new Error('No completed installation');
       const prior = s.selection?.body;
       const previous =
         prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.selected : null;
@@ -930,6 +985,7 @@ export class Generations {
         s,
         { kind: 'activate', installation: install[0], selected, fallback, nextEpoch },
         true,
+        () => this.host.active(),
       );
       this.epoch = nextEpoch;
       await this.refreshLegacy(await this.snapshot());
@@ -1045,7 +1101,11 @@ export class Generations {
         });
         s = await this.snapshot();
         // Verify the candidate and capture its exact bytes before the joint commit.
-        let response = chosen ? await this.exact(s, chosen, '/') : await recoveryDocument();
+        const lost =
+          !chosen &&
+          !recoveryRequest &&
+          ((await this.resourceLoss(s, selected)) || (await this.resourceLoss(s, fallback)));
+        let response = chosen ? await this.exact(s, chosen, '/') : await recoveryDocument(lost);
         if (chosen && !(await this.verify(s, chosen))) throw new Error('Candidate changed');
         await this.append(s, {
           kind: 'deliver',
@@ -1491,6 +1551,14 @@ export class Generations {
       if (this.unavailable) return false;
       let s = await this.snapshot();
       if (
+        !this.host.active() ||
+        [...s.records.values()].some(
+          (r) =>
+            r.kind === 'reserve' &&
+            r.purpose === 'install' &&
+            r.worker === this.worker &&
+            r.epoch === s.epoch,
+        ) ||
         s.head?.id !== observedHead ||
         s.owner !== this.worker ||
         s.epoch !== this.epoch ||

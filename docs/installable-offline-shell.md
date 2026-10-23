@@ -21,7 +21,7 @@ static files and verified completion/selection already exist at this point. The
 next ordinary navigation, reload or installed-app launch acquires control, including
 when that next load is offline. There is no `clients.claim()`, forced activation or
 automatic reload. Controlled readiness requires persisted document ownership and a
-verified complete inventory. Test airplane-mode hard reload and cold reopen in both
+verified complete inventory. Test an available safe airplane-mode reload control and cold reopen in both
 English and Brazilian Portuguese. Locale detection/preference/fallback, zoom,
 safe areas and existing authentication feedback remain available.
 
@@ -225,8 +225,31 @@ it is not production or physical iPhone rollback evidence.
 Tasks **3.2–3.4 stay unchecked**: actual post-merge Pages publication/header/asset
 verification; PM iPhone/Chrome Share installation, standalone launch, online Auth,
 offline hard reload/cold reopen, both locales and safe-area/touch acceptance; then
-same-installed-app waiting update, recovery and compatible rollback. Record iPhone,
+same-installed-app observable waiting update and separately authorized compatible rollback. Internal recovery cases use representative evidence. Record iPhone,
 iOS/Chrome versions, URL and revisions with sanitized pass/fail, never identity,
 tokens, codes, account screenshots or live-account traces. Desktop Chromium and
 synthetic WebKit-style absent-hint cases supplement but cannot replace these gates.
 Keep this change unarchived and later changes planning-only until acceptance.
+
+## Task 3.4 evidence contract
+
+Physical Task 3.4 covers only PM-observed behavior in the same Home Screen installation: waiting notice if observable, usable existing document, close-all/reopen adoption, online use, complete offline close-all/cold reopen in English and Brazilian Portuguese, and absence of unexpected retry, forced reload or installation loss. Test an available safe normal reload control normally. If none exists, record physical reload as `unavailable/not tested`, never passed; combine bilingual physical offline cold-reopen evidence with the separate mapped automated/browser reload evidence. A waiting notice `not observed` does not alone block acceptance after rendered bilingual notice, waiting-worker and retention evidence pass. A broken notice, forced navigation/reload, unusable UI or lost installation is a failure requiring investigation.
+
+Fault injection, exact generation/controller ownership, repair ordering, failed/offline/successful repair, staging isolation and repaired-file adoption are **not manually executed on the physical iPhone; covered by representative automated/hosted evidence**. The product guarantees remain unchanged; only these subcases' evidence source changes. No phone developer tooling, cache mutation, cookies/tokens/sessions/account-storage inspection, callback inputs, API responses or private-data inspection/export is permitted. Compatible production rollback/restoration require separate explicit authorization and exact release verification outside the phone. Neither deployment nor phone interaction is authorized by this implementation.
+
+## Interrupted activation and later installation recovery
+
+Activation-event completion is not a durability guarantee. The corrected worker independently reconciles native browser-active instance identity with the existing v3 ledger before functional events, under the original writer lock and parent/epoch fence. It restores an existing commit or transfers one uniquely eligible completed installation after complete candidate/predecessor verification. It never assigns a binding to an already unbound recovery document. Same-build ambiguous reinstall, unsupported proof or damaged metadata remains unavailable; do not clear storage to bypass these checks.
+
+For a later separately authorized recovery, first review/verify a distinct corrected worker release and its complete compatible inventory. Preserve the installed app and all origin data. A normal browser update can install that worker while an existing recovery document stays open; normal activation still waits for safe lifecycle conditions. New authorized document navigation can then acquire a fresh binding. No exact sequence or one-reload success is promised before representative migration and hosted checks pass. The old embedded document cannot acquire new script code in place; controller refresh in this correction applies to newly delivered recovery documents. No site-data clearing, reinstall, cache mutation or automatic repair is a recovery mechanism.
+
+The physical document remains untouched pending separate PM authorization. A production rollback to either previous revision is not a demonstrated repair for stranded ownership and is not authorized.
+
+The old recovery document's hash-only `script-src` also blocks script-initiated
+`registration.update()` through CSP's worker-source fallback. Do not use developer
+script execution or relax that policy to recover an existing installation.
+The disposable archived-611994f regression instead demonstrates the browser's
+normal navigation-triggered soft update while the original recovery stays open,
+followed by normal activation and new-document adoption after all clients close.
+Update scheduling remains browser-owned; this evidence is not a physical-phone
+pass or permission to interact with the currently preserved document.

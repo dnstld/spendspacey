@@ -18,7 +18,7 @@ Change 2/4. No profiles query, IndexedDB/Dexie, private application snapshot, ba
 - [x] 3.1 Extend the existing Linux job with manifest/Chromium installability diagnostics and the focused offline/cache/update suite. Verify the documented full synthetic checks plus strict OpenSpec validation pass with pinned actions, sanitized failure artifacts, no live-account/host credentials, no Lighthouse PWA score gate, and no browser-matrix expansion.
 - [ ] 3.2 After review/CI and the accepted merge to `main`, publish through the existing Pages GitHub integration at the predecessor's production origin. Verify actual worker/manifest bytes/MIME, root scope, revalidation, native SPA fallback without top-level `404.html` or catch-all rewrites, callback no-store/no-referrer, and CSP compatibility. Check required assets exist and reject fallback HTML as a valid worker/chunk; do not require arbitrary missing paths to return 404 or add Cloudflare runtime/storage products. Record version/URL/header outcomes without claiming local preview proves host behavior.
 - [ ] 3.3 Have the PM record the iPhone model and tested iOS/Google Chrome versions, open the production Pages URL in Chrome, use Share → Add to Home Screen, confirm the Spendspacey name/intended icon, and launch from the Home Screen. Verify standalone web-app presentation rather than an ordinary browser bookmark/tab. From that installed app, complete online sign-in/identity/sign-out, reach static readiness, and verify airplane-mode reload and full close/reopen, both languages, safe areas, touch controls, avatar fallbacks, and reconnect guidance. Record sanitized versions/URL/revision/pass-fail evidence; desktop Chromium cannot replace this manual PM gate and Safari-specific manual acceptance is not required.
-- [ ] 3.4 Publish a compatible accepted replacement merged into `main`, or identify a previously accepted complete production replacement, at that same origin and verify the waiting notice plus close-all-windows/reopen transition in the same installed iPhone Home Screen app added through Chrome; verify worker-aware recovery/rollback against complete builds. Record tested iOS/Chrome versions and sanitized update evidence without adding any application data feature.
+- [ ] 3.4 Complete the PM-only observable lifecycle acceptance using the combined evidence contract below; separately authorize compatible production rollback/restoration. Do not claim representative internal/fault tests as physical-device passes.
 
 ## Correction verification refinements
 
@@ -52,3 +52,22 @@ belongs only to the separate paused acceptance work until post-fix reconciliatio
 Tasks 3.3/3.4 remain unchecked; the change is unarchived and later changes remain
 planning-only. No production/external settings changed; reviewer approval is
 required before merge.
+
+## Task 3.4 evidence contract
+
+Physical Task 3.4 covers only PM-observed behavior in the same Home Screen installation: waiting notice if observable, usable existing document, close-all/reopen adoption, online use, complete offline close-all/cold reopen in English and Brazilian Portuguese, and absence of unexpected retry, forced reload or installation loss. Test an available safe normal reload control normally. If none exists, record physical reload as `unavailable/not tested`, never passed; combine bilingual physical offline cold-reopen evidence with the separate mapped automated/browser reload evidence. A waiting notice `not observed` does not alone block acceptance after rendered bilingual notice, waiting-worker and retention evidence pass. A broken notice, forced navigation/reload, unusable UI or lost installation is a failure requiring investigation.
+
+Fault injection, exact generation/controller ownership, repair ordering, failed/offline/successful repair, staging isolation and repaired-file adoption are **not manually executed on the physical iPhone; covered by representative automated/hosted evidence**. The product guarantees remain unchanged; only these subcases' evidence source changes. No phone developer tooling, cache mutation, cookies/tokens/sessions/account-storage inspection, callback inputs, API responses or private-data inspection/export is permitted. Compatible production rollback/restoration require separate explicit authorization and exact release verification outside the phone. Neither deployment nor phone interaction is authorized by this implementation.
+
+## Restart-resumable activation implementation
+
+Implement the approved native-instance reconciliation, idempotent uncertain-write recovery and fresh-controller recovery protocol. Verification belongs to Tasks 1.3/2.2/3.1; external gates 3.2–3.4 remain unchecked at the main-derived **6/9**. No production or physical-phone acceptance results are imported from the separate dirty acceptance worktree. Keep the open phone recovery document untouched and later changes planning-only.
+
+Local correction verification passed: 563 unit/component tests; 460 deterministic
+activation case executions; 800 deterministic repair-ordering executions; 61
+Chromium/origin/PWA tests with zero retries; supplemental disposable WebKit 27.2
+native identity/activation timing; all build/inventory/integrity/delivery/CSP,
+configuration, format/lint/types, secret and strict OpenSpec checks. Exact-head
+Linux CI and deployed preview are reported on the implementation draft PR.
+This does not complete external Tasks 3.2–3.4 or import their separate acceptance
+results. Progress remains **6/9** on this implementation branch.
