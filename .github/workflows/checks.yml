@@ -43,7 +43,7 @@ jobs:
         run: pnpm typecheck
       - name: Deterministic repair ordering (10 repetitions, ordinary and constrained)
         run: pnpm test:repair
-      - name: Activation interruption and concurrency (10 repetitions, ordinary and constrained)
+      - name: Activation/startup restoration and concurrency (10 repetitions, ordinary and constrained)
         run: pnpm test:activation
       - name: Unit and component tests
         run: pnpm test:unit

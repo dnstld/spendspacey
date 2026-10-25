@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
@@ -934,6 +934,8 @@ test('actual 069dbc50 worker installs, cuts over through normal waiting, imports
 // application policy and the actual compiled generation engine are unchanged.
 const interruptedActivation = `
 self.__activationFault = false;
+self.__validationClockOffset = 0;
+const nativeNow = Date.now; Date.now = () => nativeNow() + self.__validationClockOffset;
 self.__identity = [];
 const identity = () => ({ supported: !!self.serviceWorker, active: !!self.serviceWorker && self.registration.active === self.serviceWorker, state: self.serviceWorker?.state });
 self.addEventListener('install', () => self.__identity.push({ event: 'install', ...identity() }));
@@ -1040,7 +1042,7 @@ for (const mode of [
       ).toBeDisabled();
       const unbound = await message(recovery, 'STATUS');
       expect(unbound).toMatchObject({
-        prepared: true,
+        prepared: mode === 'stranded old implementation',
         authority: 'none',
         binding: null,
         ready: false,
@@ -1067,7 +1069,12 @@ for (const mode of [
       await recovery.close();
       if (mode === 'same global') {
         await replacement.evaluate(() => {
-          (self as unknown as { __activationFault: boolean }).__activationFault = false;
+          const worker = self as unknown as {
+            __activationFault: boolean;
+            __validationClockOffset: number;
+          };
+          worker.__activationFault = false;
+          worker.__validationClockOffset += 5001;
         });
       } else if (mode === 'worker restart') {
         const monitor = await context.newPage();
@@ -1102,6 +1109,282 @@ for (const mode of [
       expect(host.state.privateRequests).toBe(0);
     } finally {
       if (context !== defaultContext) await context.close();
+      await host.close();
+      await rm(profile, { recursive: true, force: true });
+    }
+  });
+}
+
+// Only disposable worker globals receive faults; production bytes/configuration
+// and personal devices are never modified by these representative tests.
+const oneColdReadFault = `const coldStartup = self.serviceWorker?.state === 'activated';
+let injected = false; const originalKeys = CacheStorage.prototype.keys;
+CacheStorage.prototype.keys = async function() {
+  if (coldStartup && !injected) { injected = true; throw new DOMException('synthetic startup access', 'UnknownError'); }
+  return originalKeys.call(this);
+};\n`;
+async function stopWorkers(context: BrowserContext) {
+  const monitor = await context.newPage();
+  const cdp = await context.newCDPSession(monitor);
+  const versions = new Map<string, string>();
+  cdp.on('ServiceWorker.workerVersionUpdated', (event) => {
+    for (const version of event.versions) versions.set(version.versionId, version.runningStatus);
+  });
+  await cdp.send('ServiceWorker.enable');
+  await expect.poll(() => versions.size).toBeGreaterThan(0);
+  await cdp.send('ServiceWorker.stopAllWorkers');
+  await expect.poll(() => [...versions.values()].every((state) => state === 'stopped')).toBe(true);
+  await cdp.detach();
+  await monitor.close();
+}
+for (const locale of ['en', 'pt-BR'])
+  for (const fixed of [false, true]) {
+    test(`exact unbound/reload/reopen/locale/cold sequence ${locale} fixed=${fixed}`, async ({
+      context,
+      page,
+    }) => {
+      const host = await pwaServer();
+      const outside: string[] = [];
+      context.on('request', (request) => {
+        if (new URL(request.url()).origin !== host.origin)
+          outside.push(new URL(request.url()).origin);
+      });
+      try {
+        host.state.directory = '.cache/installable-offline-shell/v1';
+        await prepared(page, host.origin);
+        await page.getByRole('combobox').selectOption(locale);
+        const predecessor = await message(page, 'STATUS');
+        host.state.directory = '.cache/installable-offline-shell/baseline-611994f';
+        host.state.workerPrefix = interruptedActivation;
+        await page.evaluate(async () =>
+          (await navigator.serviceWorker.getRegistration())!.update(),
+        );
+        await expect
+          .poll(() =>
+            page.evaluate(async () => !!(await navigator.serviceWorker.getRegistration())!.waiting),
+          )
+          .toBe(true);
+        const replacement = context.serviceWorkers().at(-1)!;
+        await page.close();
+        await expect
+          .poll(() =>
+            replacement.evaluate(() => {
+              const worker = self as unknown as {
+                __faults?: number;
+                registration: ServiceWorkerRegistration;
+              };
+              return !!worker.__faults && worker.registration.active?.state === 'activated';
+            }),
+          )
+          .toBe(true);
+        await stopWorkers(context);
+        const unbound = await context.newPage();
+        await unbound.goto(host.origin);
+        await expect(unbound.locator('#repair')).toBeDisabled();
+        await expect(unbound.getByRole('status')).toContainText(
+          locale === 'en' ? 'no verified document binding' : 'vínculo de documento verificado',
+        );
+        host.state.directory = fixed
+          ? '.cache/installable-offline-shell/v2'
+          : '.cache/installable-offline-shell/before-startup-fabde5f';
+        host.state.workerPrefix = oneColdReadFault;
+        // One deliberate reload still belongs to the old active controller.
+        await Promise.all([unbound.waitForNavigation(), unbound.locator('#reload').click()]);
+        await expect(unbound.locator('#repair')).toBeDisabled();
+        await expect
+          .poll(() =>
+            unbound.evaluate(
+              async () => !!(await navigator.serviceWorker.getRegistration())!.waiting,
+            ),
+          )
+          .toBe(true);
+        await unbound.close();
+        const working = await context.newPage();
+        await disableHttpCache(working);
+        await working.goto(host.origin);
+        await expect(
+          working.getByRole('heading', { name: 'Spendspacey', exact: true }),
+        ).toBeVisible();
+        await expect(working.getByTestId('offline-readiness')).toContainText(
+          /ready for offline|pronta para uso offline/,
+        );
+        const committed = await message(working, 'STATUS');
+        expect(committed.binding).toBeTruthy();
+        let navigations = 0;
+        working.on('framenavigated', (frame) => {
+          if (frame === working.mainFrame()) navigations++;
+        });
+        const next = locale === 'en' ? 'pt-BR' : 'en';
+        await working.getByRole('combobox').selectOption(next);
+        await expect(working.locator('html')).toHaveAttribute('lang', next);
+        expect(navigations).toBe(0);
+        await working.close();
+        await stopWorkers(context);
+        const cold = await context.newPage();
+        await disableHttpCache(cold);
+        await cold.goto(host.origin);
+        await expect(cold.locator('html')).toHaveAttribute('lang', next);
+        if (fixed) {
+          await expect(
+            cold.getByRole('heading', { name: 'Spendspacey', exact: true }),
+          ).toBeVisible();
+          await expect(cold.getByTestId('offline-readiness')).toContainText(
+            /ready for offline|pronta para uso offline/,
+          );
+          expect((await message(cold, 'STATUS')).ready).toBe(true);
+          await setOffline(context, true);
+          await cold.reload();
+          await expect(cold.getByTestId('offline-readiness')).toContainText(
+            /ready for offline|pronta para uso offline/,
+          );
+          await setOffline(context, false);
+        } else {
+          await expect(cold.locator('#repair')).toBeDisabled();
+          await expect(cold.getByRole('status')).toContainText(
+            next === 'en'
+              ? 'cannot safely access its saved state'
+              : 'não pode acessar o estado salvo',
+          );
+          expect((await message(cold, 'STATUS')).binding).toBeNull();
+        }
+        const ledger = await records(cold);
+        expect(ledger.some((record) => record.id === predecessor.binding)).toBe(true);
+        expect(ledger.some((record) => record.id === committed.binding)).toBe(true);
+        expect(
+          ledger.some((record) => record.body.kind === 'attempt' || record.body.kind === 'seal'),
+        ).toBe(false);
+        expect(outside).toEqual([]);
+        expect(host.state.privateRequests).toBe(0);
+      } finally {
+        await host.close();
+      }
+    });
+  }
+for (const locale of ['en', 'pt-BR']) {
+  test(`same-build registration recreation retains committed selection and locale ${locale}`, async ({
+    context,
+    page,
+  }) => {
+    const host = await pwaServer();
+    try {
+      await prepared(page, host.origin);
+      await page.getByRole('combobox').selectOption(locale);
+      const committed = await message(page, 'STATUS');
+      expect(
+        await page.evaluate(async () =>
+          (await navigator.serviceWorker.getRegistration())!.unregister(),
+        ),
+      ).toBe(true);
+      await page.close();
+      const network = await context.newPage();
+      const response = await network.goto(host.origin);
+      expect(response!.fromServiceWorker()).toBe(false);
+      await expect(network.getByTestId('offline-readiness')).toContainText(
+        /Prepared for offline|Preparado para uso offline/,
+      );
+      expect(await network.evaluate(() => !!navigator.serviceWorker.controller)).toBe(false);
+      await network.close();
+      await stopWorkers(context);
+      const cold = await context.newPage();
+      await disableHttpCache(cold);
+      await cold.goto(host.origin);
+      await expect(cold.getByTestId('offline-readiness')).toContainText(
+        /ready for offline|pronta para uso offline/,
+      );
+      await expect(cold.locator('html')).toHaveAttribute('lang', locale);
+      const restored = await message(cold, 'STATUS');
+      expect(restored.epoch).toBe(committed.epoch);
+      expect(restored.generation).toBe(committed.generation);
+      const ledger = await records(cold);
+      expect(ledger.filter((r) => r.body.kind === 'activate')).toHaveLength(1);
+      expect(
+        ledger.filter((r) => r.body.kind === 'reserve' && r.body.purpose === 'install'),
+      ).toHaveLength(2);
+      expect(ledger.some((r) => r.id === committed.binding)).toBe(true);
+      expect(ledger.some((r) => r.body.kind === 'seal' || r.body.kind === 'attempt')).toBe(false);
+      await setOffline(context, true);
+      await cold.reload();
+      await expect(cold.getByRole('heading', { name: 'Spendspacey', exact: true })).toBeVisible();
+      expect(host.state.privateRequests).toBe(0);
+    } finally {
+      await setOffline(context, false);
+      await host.close();
+    }
+  });
+}
+
+for (const termination of ['graceful', 'abrupt'] as const) {
+  test(`persistent profile ${termination} process termination preserves available same-build owner`, async () => {
+    const host = await pwaServer();
+    host.state.workerPrefix = oneColdReadFault;
+    const profile = await mkdtemp(join(tmpdir(), 'spendspacey-startup-profile-'));
+    const launcher = join(profile, 'owned-browser-launcher');
+    const pidFile = join(profile, 'owned-browser.pid');
+    const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+    await writeFile(
+      launcher,
+      '#!/bin/sh\nprintf %s "$$" > ' +
+        quote(pidFile) +
+        '\nexec ' +
+        quote(chromium.executablePath()) +
+        ' "$@"\n',
+      { mode: 0o700 },
+    );
+    let context: BrowserContext | undefined;
+    let firstEpoch: unknown;
+    let firstBinding: unknown;
+    const outside: string[] = [];
+    try {
+      for (let round = 0; round < 3; round++) {
+        context = await chromium.launchPersistentContext(profile, {
+          headless: true,
+          executablePath: launcher,
+          offline: round === 2,
+        });
+        context.on('request', (request) => {
+          if (new URL(request.url()).origin !== host.origin)
+            outside.push(new URL(request.url()).origin);
+        });
+        const page = await context.newPage();
+        await disableHttpCache(page, round === 2);
+        if (!round) await prepared(page, host.origin);
+        else await page.goto(host.origin);
+        await expect(page.getByTestId('offline-readiness')).toContainText(
+          /ready for offline|pronta para uso offline/,
+        );
+        const state = await message(page, 'STATUS');
+        expect(state.ready).toBe(true);
+        if (!round) {
+          firstEpoch = state.epoch;
+          firstBinding = state.binding;
+        }
+        expect(state.epoch).toBe(firstEpoch);
+        const ledger = await records(page);
+        expect(ledger.some((record) => record.id === firstBinding)).toBe(true);
+        expect(ledger.filter((record) => record.body.kind === 'activate')).toHaveLength(1);
+        expect(
+          ledger.some((record) => record.body.kind === 'attempt' || record.body.kind === 'seal'),
+        ).toBe(false);
+        await page.getByRole('combobox').selectOption(round % 2 ? 'en' : 'pt-BR');
+        if (termination === 'abrupt') {
+          // This PID belongs only to the exec'd browser created by this temporary launcher.
+          const pid = Number(await readFile(pidFile, 'utf8'));
+          expect(Number.isSafeInteger(pid)).toBe(true);
+          const disconnected = new Promise<void>((resolve) =>
+            context!.once('close', () => resolve()),
+          );
+          process.kill(pid, 'SIGKILL');
+          await disconnected;
+        } else {
+          for (const document of context.pages()) await document.close();
+          await context.close();
+        }
+        context = undefined;
+      }
+      expect(outside).toEqual([]);
+      expect(host.state.privateRequests).toBe(0);
+    } finally {
+      await context?.close();
       await host.close();
       await rm(profile, { recursive: true, force: true });
     }

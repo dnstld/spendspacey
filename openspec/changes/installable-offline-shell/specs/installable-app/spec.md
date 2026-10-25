@@ -255,10 +255,16 @@ A browser-active worker SHALL resume interrupted ownership independently of acti
 - **AND** the current parent/head, epoch, unique completed reservation and native active authority are validated before persistence; waiting/stale/superseded/ambiguous/corrupt/forked/incompatible candidates cannot claim ownership
 - **AND** repeated write failure remains bounded and unavailable; no unbound recovery document receives invented authority
 
-#### Scenario: Same-build installation cannot be identified
-- **WHEN** multiple eligible reservations exist or an unconsumed same-build reservation exists while that build already owns the ledger
-- **THEN** reconciliation fails closed without using an obsolete reservation or treating build identity as installation identity
-- **AND** existing schema/protocol and legacy/repair/cleanup history remain intact
+#### Scenario: Restore committed ownership without inferring installation identity
+- **WHEN** native browser-active identity for the expected origin/root scope and the committed same-build owner, epoch, lineage, selection and resources independently validate
+- **THEN** resume the existing committed epoch and selection without another activation, reservation consumption/association, staged-resource selection, binding change or repair/adoption reversal
+- **AND** one or multiple unrelated same-build installation reservations remain quarantined with protected resources and deferred cleanup; they do not block valid owner restoration
+- **AND** build equality proves compatibility only, not worker-instance or registration/reservation identity; no schema/protocol migration or safety-history reset occurs
+
+#### Scenario: Different-owner transfer remains ambiguous
+- **WHEN** ownership differs and the current validated lineage has multiple eligible reservations, a superseded reservation or no unique completed installation provenance
+- **THEN** fail closed without transfer, repair, cleanup or reconstruction from resource bytes
+- **AND** waiting, stale, redundant, incompatible, corrupt and forked candidates cannot mutate
 
 #### Scenario: Recovery controller changes or resources remain intact
 - **WHEN** the controller is absent, changes or returns a delayed/obsolete/missing reply
@@ -272,3 +278,30 @@ A browser-active worker SHALL resume interrupted ownership independently of acti
 Physical Task 3.4 covers only PM-observed behavior in the same Home Screen installation: waiting notice if observable, usable existing document, close-all/reopen adoption, online use, complete offline close-all/cold reopen in English and Brazilian Portuguese, and absence of unexpected retry, forced reload or installation loss. Test an available safe normal reload control normally. If none exists, record physical reload as `unavailable/not tested`, never passed; combine bilingual physical offline cold-reopen evidence with the separate mapped automated/browser reload evidence. A waiting notice `not observed` does not alone block acceptance after rendered bilingual notice, waiting-worker and retention evidence pass. A broken notice, forced navigation/reload, unusable UI or lost installation is a failure requiring investigation.
 
 Fault injection, exact generation/controller ownership, repair ordering, failed/offline/successful repair, staging isolation and repaired-file adoption are **not manually executed on the physical iPhone; covered by representative automated/hosted evidence**. The product guarantees remain unchanged; only these subcases' evidence source changes. No phone developer tooling, cache mutation, cookies/tokens/sessions/account-storage inspection, callback inputs, API responses or private-data inspection/export is permitted. Compatible production rollback/restoration require separate explicit authorization and exact release verification outside the phone. Neither deployment nor phone interaction is authorized by this implementation.
+
+### Requirement: Startup access failures are retryable without weakening validation
+
+The worker SHALL distinguish immutable build/configuration failure, retryable storage-access rejection and invalid durable state at their failure sources. Retryable failure SHALL confer no authority until complete successful validation. Established metadata loss, structural corruption, unsupported formats/namespaces, incompatible configuration and forked lineage SHALL remain fail-closed without reconstruction or safety-state reset.
+
+#### Scenario: Shared bounded validation survives transient access failure
+- **WHEN** startup or ownership revalidation encounters a rejected storage operation
+- **THEN** share one flight per global under the existing exclusive writer lock, allow two failed attempts per burst, and permit a later eligible event after a five-second cooldown
+- **AND** retry no failed flight recursively or in the background, multiply no attempt per concurrent resource, and initiate no repair/reload
+- **AND** retain ledger observation, epochs, bindings, repair/spent history and cleanup seals across attempts
+
+#### Scenario: Validation hangs or settles late
+- **WHEN** a flight exceeds its two-second caller deadline
+- **THEN** return neutral unavailable recovery while retaining the original flight and writer lock until settlement
+- **AND** no concurrent or late continuation publishes authority or unfenced writes; stale deadline callbacks cannot alter completed flights
+- **AND** a later complete validation resolves uncertain writes without duplicate activation/publication or replay
+
+#### Scenario: Truthful recovery and preparation
+- **WHEN** state cannot temporarily be accessed/validated, durable validation fails, or resources are positively missing/corrupt
+- **THEN** show distinct exact English/Brazilian Portuguese guidance without a generally reliable reopen remedy; unauthorized recovery repair remains disabled
+- **AND** uncontrolled network documents remain unconfirmed and cannot report bound/offline-ready; delivery still requires the exact browser-issued identity and joint persisted/read-back verified binding
+- **AND** recovery retains its restrictive CSP, zero Auth SDK execution and private-data boundaries; no network HTML fallback bypasses controlled delivery
+
+#### Scenario: Representative cold-launch availability
+- **WHEN** disposable tests execute unbound recovery, one reload still in recovery, full close/reopen into application, locale change, then another cold reopen with one transient startup read rejection
+- **THEN** the corrected implementation must display a working application with healthy retained state in both languages, preserving owner epoch, selection and old bindings
+- **AND** regression evidence distinguishes pre-correction failure from corrected availability without claiming physical iPhone acceptance or its hidden trigger

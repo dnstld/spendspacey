@@ -22,7 +22,7 @@ export const ptBR = {
   },
   pwa: {
     prepared:
-      'Preparado para uso offline. Recarregue ou abra o Spendspacey novamente para concluir.',
+      'Preparado para uso offline sob verificação. Este documento não está confirmado como pronto; um documento controlado precisa verificar seus arquivos salvos.',
     repaired:
       'O reparo foi concluído. Recarregue ou reabra o Spendspacey para usá-lo. Outros documentos abertos mantêm os arquivos atuais.',
     preparing: 'Preparando o aplicativo para uso offline…',

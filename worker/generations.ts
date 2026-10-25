@@ -1,3 +1,4 @@
+import { accessibleCaches, StorageAccessFailure, storageAccess } from './access';
 import {
   META,
   LOCK,
@@ -41,6 +42,8 @@ export interface GenerationHost {
   online: () => boolean;
   // Native running-instance proof; never a URL, build identity or page assertion.
   active: () => boolean;
+  validationNow?: () => number;
+  scheduleValidationDeadline?: (callback: () => void, milliseconds: number) => () => void;
   repairDeadline?: number;
   scheduleRepairDeadline?: (callback: () => void, milliseconds: number) => () => void;
 }
@@ -93,7 +96,19 @@ export class Generations {
   readonly legacyCompatibility: string;
   readonly entries: Entry[];
   descriptor!: Descriptor;
-  private initialized?: Promise<void>;
+  private buildValidation?: Promise<void>;
+  private invalid: 'build' | 'state' | null = null;
+  private validated = false;
+  private authorityReady = false;
+  private capturedStartup = false;
+  private failures = 0;
+  private retryAfter = 0;
+  private validationFlight?: { active: boolean; expired: boolean; view: Promise<boolean> };
+  // Two failed flights per burst; later eligible events may retry after five seconds.
+  // The two-second caller deadline never releases the underlying writer lock/flight.
+  static readonly validationAttempts = 2;
+  static readonly validationCooldown = 5000;
+  static readonly validationDeadline = 2000;
   private unavailable = false;
   private sawLedger = false;
   private epoch: string | null = null;
@@ -103,6 +118,7 @@ export class Generations {
     readonly host: GenerationHost,
     inventory: WorkerInventory[],
   ) {
+    host.caches = accessibleCaches(host.caches);
     const first = inventory[0];
     if (
       !first ||
@@ -133,8 +149,14 @@ export class Generations {
     if (!this.host.locks) return Promise.reject(new Error('Shared serialization unavailable'));
     return await this.host.locks.request(LOCK, { mode: 'exclusive' }, op);
   }
-  initialize(): Promise<void> {
-    return (this.initialized ??= this.run(async () => {
+  private fail(error: unknown) {
+    this.unavailable = true;
+    this.validated = false;
+    this.authorityReady = false;
+    if (!(error instanceof StorageAccessFailure)) this.invalid = 'state';
+  }
+  private async validateBuild() {
+    return (this.buildValidation ??= (async () => {
       try {
         if (
           (await digest(
@@ -159,21 +181,120 @@ export class Generations {
           this.host.origin,
           this.compatibility,
         );
-        const s = await this.snapshot();
-        this.startupEpoch = s.epoch;
-        this.epoch = s.owner === this.worker ? s.epoch : null;
-        if ([...s.records.values()].some((r) => r.kind === 'cutover')) {
-          await this.legacyHistory(s);
-          if (s.owner === this.worker && this.host.active()) await this.refreshLegacy(s);
-        }
-      } catch {
+      } catch (error) {
+        this.invalid = 'build';
         this.unavailable = true;
+        throw error;
       }
-    }).catch(() => {
+    })());
+  }
+  private async validate(active: boolean): Promise<boolean> {
+    if (this.invalid || (active && !this.host.active())) return false;
+    const existing = this.validationFlight;
+    if (existing) {
+      const complete = await existing.view;
+      // A read-only preparation flight cannot grant mutation authority.
+      return complete && active && !existing.active ? this.validate(true) : complete;
+    }
+    if (this.validated && (!active || (this.authorityReady && this.host.active()))) return true;
+    const now = (this.host.validationNow ?? Date.now)();
+    if (this.failures >= Generations.validationAttempts) {
+      if (now < this.retryAfter) return false;
+      this.failures = 0; // Only the retry budget resets, never observed durable state.
+    }
+    let finish!: (value: boolean) => void;
+    const flight = {
+      active,
+      expired: false,
+      view: new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    };
+    this.validationFlight = flight;
+    let disarm = () => {};
+    let settled = false;
+    const settle = (complete: boolean) => {
+      settled = true;
+      disarm();
+      if (this.validationFlight === flight) this.validationFlight = undefined;
+      finish(complete);
+    };
+    const unavailable = () => {
       this.unavailable = true;
-    }));
+      this.validated = false;
+      this.authorityReady = false;
+      this.failures++;
+      this.retryAfter = (this.host.validationNow ?? Date.now)() + Generations.validationCooldown;
+    };
+    const schedule =
+      this.host.scheduleValidationDeadline ??
+      ((callback, milliseconds) => {
+        const timer = setTimeout(callback, milliseconds);
+        return () => clearTimeout(timer);
+      });
+    disarm = schedule(() => {
+      if (settled || flight.expired) return;
+      flight.expired = true;
+      unavailable();
+      finish(false);
+      // Keep flight and writer lock until the underlying operation settles.
+    }, Generations.validationDeadline);
+    void this.run(async () => {
+      await this.validateBuild();
+      const s = await this.snapshot();
+      if (!this.capturedStartup) {
+        this.startupEpoch = s.epoch;
+        this.capturedStartup = true;
+      }
+      if ([...s.records.values()].some((r) => r.kind === 'cutover')) {
+        try {
+          await this.legacyHistory(s);
+        } catch (error) {
+          this.fail(error);
+          throw error;
+        }
+      }
+      if (flight.expired) return false;
+      // Validation may now write only under this exclusive lock and live flight.
+      this.unavailable = false;
+      if (active) await this.restoreActivation(() => !flight.expired && this.host.active());
+      if (flight.expired) return false;
+      this.validated = true;
+      this.authorityReady = active;
+      this.failures = 0;
+      return true;
+    }).then(
+      (complete) => settle(complete),
+      (error) => {
+        if (!flight.expired && !this.invalid) unavailable();
+        void error;
+        // Invalid durable state is latched by snapshot at the validation boundary.
+        // Rejected authority/transfer never becomes permission to mutate.
+        this.unavailable = true;
+        this.validated = false;
+        this.authorityReady = false;
+        settle(false);
+      },
+    );
+    return flight.view;
+  }
+  async initialize(): Promise<void> {
+    await this.validate(false);
   }
   async snapshot(extra?: Stored): Promise<Snapshot> {
+    let records: Map<string, RecordBody>;
+    try {
+      records = await this.readRecords();
+      await this.lineage(records);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+    // Invalid proposed transitions must not poison otherwise valid durable state.
+    if (extra) records.set(extra.id, extra.body);
+    return this.lineage(records);
+  }
+  private async readRecords(): Promise<Map<string, RecordBody>> {
     const names = await this.host.caches.keys();
     if (names.some((n) => n.startsWith('spendspacey-static-ownership-v') && n !== META))
       throw new Error('Unsupported ownership namespace');
@@ -222,7 +343,9 @@ export class Generations {
     }
     if (this.sawLedger && !records.size) throw new Error('Ledger evicted');
     if (records.size) this.sawLedger = true;
-    if (extra) records.set(extra.id, extra.body);
+    return records;
+  }
+  private async lineage(records: Map<string, RecordBody>): Promise<Snapshot> {
     // Only one complete immutable lineage is authoritative; a mutable head is neither read nor written.
     const children = new Map<string | null, Stored>();
     for (const [id, body] of records) {
@@ -569,8 +692,14 @@ export class Generations {
     installing = false,
     authority?: () => boolean,
   ): Promise<Stored> {
-    if (this.unavailable) throw new Error('Unavailable ledger');
-    if (!installing && (!this.host.active() || s.owner !== this.worker || s.epoch !== this.epoch))
+    if (this.unavailable || this.validationFlight?.expired) throw new Error('Unavailable ledger');
+    if (
+      !installing &&
+      ((!this.authorityReady && !authority) ||
+        !this.host.active() ||
+        s.owner !== this.worker ||
+        s.epoch !== this.epoch)
+    )
       throw new Error('Writer fenced');
     const now = await this.snapshot();
     if (now.head?.id !== s.head?.id || now.epoch !== s.epoch) throw new Error('Head changed');
@@ -590,14 +719,19 @@ export class Generations {
     const record = { id, body };
     await this.snapshot(record); // Validate the proposed transition before writing untrusted input.
     const cache = await this.host.caches.open(META);
-    if ((!installing && !this.host.active()) || (authority && !authority()))
+    if (
+      this.unavailable ||
+      this.validationFlight?.expired ||
+      (!installing && !this.host.active()) ||
+      (authority && !authority())
+    )
       throw new Error('Browser-active authority lost');
     await cache.put(
       metadataURL(this.host.origin, id),
       new Response(canonical(record), { headers: { 'content-type': 'application/json' } }),
     );
     const read = await cache.match(metadataURL(this.host.origin, id));
-    if (!read || (await read.text()) !== canonical(record))
+    if (!read || (await storageAccess(() => read.text())) !== canonical(record))
       throw new Error('Commit read-back failed');
     const restored = await this.snapshot();
     if (restored.head?.id !== id) throw new Error('Commit lineage failed');
@@ -632,7 +766,11 @@ export class Generations {
       );
       if (!verified.every(Boolean)) return false;
       return true;
-    } catch {
+    } catch (error) {
+      if (error instanceof StorageAccessFailure) {
+        this.fail(error);
+        throw error;
+      }
       return false;
     }
   }
@@ -779,12 +917,12 @@ export class Generations {
       prior,
     };
   }
-  private async refreshLegacy(s: Snapshot) {
+  private async refreshLegacy(s: Snapshot, authority?: () => boolean) {
     const history = await this.legacyHistory(s);
     if (history && history.legacyDigest !== history.prior.legacyDigest) {
       const { prior: _, ...update } = history;
       void _;
-      await this.append(s, { kind: 'legacy-update', ...update });
+      await this.append(s, { kind: 'legacy-update', ...update }, false, authority);
       return this.snapshot();
     }
     return s;
@@ -916,80 +1054,88 @@ export class Generations {
   // Functional events retry once under the writer lock, not through a permanently
   // rejected activate-event promise. No network, repair or cleanup is performed.
   async reconcile(): Promise<boolean> {
-    try {
-      await this.activate();
-      return true;
-    } catch {
-      return false;
-    }
+    return this.validate(true);
   }
   async activate(): Promise<void> {
-    await this.initialize();
-    await this.run(async () => {
-      if (this.unavailable) throw new Error('Initialization unavailable');
-      if (!this.host.active()) throw new Error('Not the browser-active worker');
-      const s = await this.snapshot();
-      const eligible = [...s.records].filter(
-        ([id, r]) =>
-          r.kind === 'reserve' &&
-          r.purpose === 'install' &&
-          r.worker === this.worker &&
-          r.epoch === s.epoch &&
-          !s.chain.some((v) => v.body.kind === 'activate' && v.body.installation === id),
-      );
-      if (s.owner === this.worker) {
-        // Already committed: preserve later repair/adoption and all history. A
-        // same-build unconsumed installation cannot be identified across globals.
-        if (eligible.length) throw new Error('Ambiguous same-build installation');
-        if (!this.host.active()) throw new Error('Browser-active authority lost');
-        this.epoch = s.epoch;
-        return;
+    if (!(await this.validate(true))) throw new Error('Activation validation unavailable');
+  }
+  private async restoreActivation(authority: () => boolean): Promise<void> {
+    if (!authority()) throw new Error('Not the browser-active worker');
+    const s = await this.snapshot();
+    const eligible = [...s.records].filter(
+      ([id, r]) =>
+        r.kind === 'reserve' &&
+        r.purpose === 'install' &&
+        r.worker === this.worker &&
+        r.epoch === s.epoch &&
+        !s.chain.some((v) => v.body.kind === 'activate' && v.body.installation === id),
+    );
+    if (s.owner === this.worker) {
+      // Build equality establishes compatibility, not reservation identity.
+      // Restore only the already committed epoch/selection. Pending installations
+      // remain unrelated, protected and unconsumed, even for this same build.
+      const selection = s.selection?.body;
+      if (!s.epoch || !selection || (selection.kind !== 'activate' && selection.kind !== 'deliver'))
+        throw new Error('Invalid committed ownership');
+      await this.verify(s, selection.selected);
+      await this.verify(s, selection.fallback);
+      const current = await this.snapshot();
+      if (
+        !authority() ||
+        current.head?.id !== s.head?.id ||
+        current.epoch !== s.epoch ||
+        current.owner !== s.owner
+      )
+        throw new Error('Ownership restoration fenced');
+      // Missing resources confer no application authority: respond must verify and
+      // bind a recovery document instead. Never reconstruct a generation here.
+      this.epoch = s.epoch;
+      return;
+    }
+    if (eligible.length !== 1) throw new Error('No unique fenced installation');
+    const install = eligible[0];
+    const latest = [...s.records]
+      .filter(([, r]) => r.kind === 'reserve' && r.purpose === 'install' && r.epoch === s.epoch)
+      .at(-1);
+    if (latest?.[0] !== install[0]) throw new Error('Superseded installation');
+    const candidate =
+      [...s.records].find(([, r]) => r.kind === 'complete' && r.reservation === install[0])?.[0] ??
+      null;
+    if (!candidate) throw new Error('No completed installation');
+    const prior = s.selection?.body;
+    const previous =
+      prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.selected : null;
+    const rollback =
+      prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.fallback : null;
+    const imports = [...s.records]
+      .filter(
+        ([, r]) =>
+          r.kind === 'complete' && (s.records.get(r.reservation) as Reserve).purpose === 'import',
+      )
+      .map(([id]) => id);
+    let selected: string | null = null;
+    for (const id of [candidate, previous, rollback, ...imports])
+      if (await this.verify(s, id)) {
+        selected = id;
+        break;
       }
-      if (eligible.length !== 1) throw new Error('No unique fenced installation');
-      const install = eligible[0];
-      const latest = [...s.records]
-        .filter(([, r]) => r.kind === 'reserve' && r.purpose === 'install' && r.epoch === s.epoch)
-        .at(-1);
-      if (latest?.[0] !== install[0]) throw new Error('Superseded installation');
-      const candidate =
-        [...s.records].find(
-          ([, r]) => r.kind === 'complete' && r.reservation === install[0],
-        )?.[0] ?? null;
-      if (!candidate) throw new Error('No completed installation');
-      const prior = s.selection?.body;
-      const previous =
-        prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.selected : null;
-      const rollback =
-        prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.fallback : null;
-      const imports = [...s.records]
-        .filter(
-          ([, r]) =>
-            r.kind === 'complete' && (s.records.get(r.reservation) as Reserve).purpose === 'import',
-        )
-        .map(([id]) => id);
-      let selected: string | null = null;
-      for (const id of [candidate, previous, rollback, ...imports])
-        if (await this.verify(s, id)) {
-          selected = id;
-          break;
-        }
-      let fallback: string | null = null;
-      for (const id of [previous, rollback, ...imports])
-        if (id !== selected && (await this.verify(s, id))) {
-          fallback = id;
-          break;
-        }
-      await this.legacyHistory(s);
-      const nextEpoch = crypto.randomUUID();
-      await this.append(
-        s,
-        { kind: 'activate', installation: install[0], selected, fallback, nextEpoch },
-        true,
-        () => this.host.active(),
-      );
-      this.epoch = nextEpoch;
-      await this.refreshLegacy(await this.snapshot());
-    });
+    let fallback: string | null = null;
+    for (const id of [previous, rollback, ...imports])
+      if (id !== selected && (await this.verify(s, id))) {
+        fallback = id;
+        break;
+      }
+    await this.legacyHistory(s);
+    const nextEpoch = crypto.randomUUID();
+    await this.append(
+      s,
+      { kind: 'activate', installation: install[0], selected, fallback, nextEpoch },
+      true,
+      authority,
+    );
+    if (!authority()) throw new Error('Activation continuation fenced');
+    this.epoch = nextEpoch;
+    await this.refreshLegacy(await this.snapshot(), authority);
   }
   private pending(s: Snapshot) {
     return [...s.records]
@@ -1004,9 +1150,9 @@ export class Generations {
   // No client lookup or enumeration is required to authorize delivery. Browser-issued
   // resultingClientId is reserved durably; all existing bindings remain immutable.
   async respond(request: Request, incoming = '', client = ''): Promise<Response | undefined> {
-    await this.initialize();
     const kind = routeRequest(request, this.host.origin, new Set([request.url]));
     if (kind === 'network') return undefined;
+    if (!(await this.validate(true))) return this.unavailableResponse(request);
     if (kind === 'static') {
       try {
         return await this.run(async () => {
@@ -1129,6 +1275,7 @@ export class Generations {
         )
           throw new Error('Delivery lost storage');
         if (chosen) response = await this.exact(s, chosen, '/');
+        if (!this.host.active()) throw new Error('Delivery authority lost');
         if (kind === 'callback') {
           const headers = new Headers(response.headers);
           headers.set('cache-control', 'no-store');
@@ -1166,7 +1313,8 @@ export class Generations {
     }
   }
   async evidence(client: string, result: 'handled' | 'handling-error'): Promise<void> {
-    await this.initialize();
+    // Handling evidence is not a new event eligible to retry startup or grant authority.
+    if (this.unavailable || !this.authorityReady) return;
     try {
       await this.run(async () => {
         const s = await this.snapshot();
@@ -1184,8 +1332,8 @@ export class Generations {
       /* Evidence never changes ownership. */
     }
   }
-  async status(client = ''): Promise<StaticStatus> {
-    await this.initialize();
+  async status(client = '', revalidate = true): Promise<StaticStatus> {
+    if (revalidate) await this.initialize();
     const result: StaticStatus = {
       authority: 'none',
       prepared: false,
@@ -1195,8 +1343,9 @@ export class Generations {
       epoch: null,
       binding: null,
       generation: null,
-      repair: 'unavailable',
+      repair: this.invalid ? 'blocked' : 'unavailable',
     };
+    if (this.unavailable || this.validationFlight?.expired) return result;
     try {
       return await this.run(async () => {
         if (this.unavailable) return result;
@@ -1255,7 +1404,17 @@ export class Generations {
         return result;
       });
     } catch {
-      return result;
+      return {
+        ...result,
+        authority: 'none',
+        binding: null,
+        epoch: null,
+        generation: null,
+        ready: false,
+        prepared: false,
+        pending: false,
+        repair: this.invalid ? 'blocked' : 'unavailable',
+      };
     }
   }
   // Strict v3 protocol. Caller IDs/URLs/generation claims never supply authority.
@@ -1263,8 +1422,9 @@ export class Generations {
     data: unknown,
     source: { id: string; url: string } | null,
     origin: string,
+    revalidate = true,
   ): Promise<StaticStatus | undefined> {
-    await this.initialize();
+    if (revalidate) await this.initialize();
     if (
       !source ||
       origin !== this.host.origin ||
@@ -1288,7 +1448,8 @@ export class Generations {
       (hello ? 'operation,protocol,request' : 'binding,epoch,operation,protocol,request,worker')
     )
       return;
-    const current = await this.status(source.id);
+    if (!hello && !(await this.validate(true))) return this.status(source.id, false);
+    const current = await this.status(source.id, false);
     if (hello) return current;
     if (
       !current.binding ||
@@ -1376,7 +1537,8 @@ export class Generations {
     }
   }
   async repair(request: string, client: string, binding: string): Promise<StaticStatus> {
-    await this.initialize();
+    await this.validate(true);
+    if (this.unavailable) return this.status(client, false);
     if (!this.host.locks || !UUID.test(request))
       return { ...(await this.status(client)), repair: 'blocked' };
     return this.host.locks.request(
@@ -1541,7 +1703,9 @@ export class Generations {
     );
   }
   async cleanup(): Promise<boolean> {
-    await this.initialize();
+    // Cleanup cannot turn an unavailable event into a second startup attempt.
+    if (this.unavailable || this.validationFlight?.expired) return false;
+    if (!(await this.validate(true))) return false;
     // Observations may hang. They are outside the decision lock and do not retire a pin.
     const observedHead = await this.run(async () => (await this.snapshot()).head?.id ?? null).catch(
       () => null,
@@ -1552,12 +1716,11 @@ export class Generations {
       let s = await this.snapshot();
       if (
         !this.host.active() ||
-        [...s.records.values()].some(
-          (r) =>
+        [...s.records].some(
+          ([id, r]) =>
             r.kind === 'reserve' &&
             r.purpose === 'install' &&
-            r.worker === this.worker &&
-            r.epoch === s.epoch,
+            !s.chain.some((v) => v.body.kind === 'activate' && v.body.installation === id),
         ) ||
         s.head?.id !== observedHead ||
         s.owner !== this.worker ||

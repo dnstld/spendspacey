@@ -1,3 +1,4 @@
+import { StorageAccessFailure, storageAccess } from './access.ts';
 import { staticPath, mimeFor } from './policy.ts';
 
 export const META = 'spendspacey-static-meta-v2';
@@ -108,7 +109,7 @@ export async function boundedBytes(response: Response, max: number): Promise<Uin
   let size = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await storageAccess(() => reader.read());
       if (done) break;
       size += value.length;
       if (size > max) throw new Error('Oversized response');
@@ -319,7 +320,8 @@ export async function validResource(
         btoa(String.fromCharCode(...hash.match(/../g)!.map((byte) => parseInt(byte, 16)))) ===
         entry.integrity
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof StorageAccessFailure) throw error;
     return false;
   }
 }

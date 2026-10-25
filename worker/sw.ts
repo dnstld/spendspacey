@@ -74,6 +74,7 @@ self.addEventListener('message', (event) => {
         event.data,
         { id: source.id, url: source.url },
         event.origin,
+        false,
       );
       if (status && !reconciled)
         status = {
@@ -82,7 +83,7 @@ self.addEventListener('message', (event) => {
           binding: null,
           generation: null,
           ready: false,
-          repair: 'unavailable',
+          repair: status.repair === 'blocked' ? 'blocked' : 'unavailable',
         };
       if (status)
         port.postMessage({

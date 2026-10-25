@@ -19,7 +19,8 @@ export const en = {
     unknownEmail: 'Email unavailable',
   },
   pwa: {
-    prepared: 'Prepared for offline use. Reload or reopen Spendspacey to finish.',
+    prepared:
+      'Prepared for offline verification. This document is not confirmed ready; a controlled document must verify its saved files.',
     repaired:
       'Verified repair is ready. Reload or reopen Spendspacey to use it. Other open documents keep their current files.',
     preparing: 'Preparing the app for offline use…',

@@ -492,7 +492,9 @@ describe('storage interruptions, fencing, and callback delivery', () => {
       f.failKind = '';
       const restart = await f.engine('v1');
       await restart.initialize();
-      expect(await (await root(restart)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
+      if (kind === 'activate') expect(await (await root(restart)).text()).toBe('v1:/');
+      else
+        expect(await (await root(restart)).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
     },
   );
   it.each(['quota', 'readback', 'eviction'] as const)(
@@ -547,7 +549,7 @@ describe('storage interruptions, fencing, and callback delivery', () => {
         origin + '/head',
         new Response('{}', { headers: { 'content-type': 'application/json' } }),
       );
-    expect((await restart.status('document-1')).repair).toBe('unavailable');
+    expect((await restart.status('document-1')).repair).toBe('blocked');
   });
   it.each(['fork', 'missing', 'corrupt', 'unsupported', 'configuration'] as const)(
     'rejects %s ledger state and disables unsafe repair',
@@ -585,7 +587,7 @@ describe('storage interruptions, fencing, and callback delivery', () => {
         recoveryHTML,
         resourceRecoveryHTML,
       ]);
-      expect((await restart.status('new')).repair).toBe('unavailable');
+      expect((await restart.status('new')).repair).toBe('blocked');
     },
   );
   it('fails closed when shared serialization is absent, or unsupported newer ownership exists', async () => {
@@ -919,7 +921,7 @@ describe('extended interruption and concurrency matrix', () => {
           new Response('x'.repeat(65537), { headers: { 'content-type': 'application/json' } }),
         );
       expect(await (await root(g, 'new')).text()).toBeOneOf([recoveryHTML, resourceRecoveryHTML]);
-      expect((await g.status()).repair).toBe('unavailable');
+      expect((await g.status()).repair).toBe('blocked');
       for (const r of resources) expect(f.stores.has(r)).toBe(true);
     }
   });
@@ -937,12 +939,12 @@ describe('extended interruption and concurrency matrix', () => {
         recoveryHTML,
         resourceRecoveryHTML,
       ]);
-      expect((await incompatible.status()).repair).toBe('unavailable');
+      expect((await incompatible.status()).repair).toBe('blocked');
     }
     const other = await f.engine('v1');
     other.host.origin = 'https://preview.example.test';
     await other.initialize();
-    expect((await other.status()).repair).toBe('unavailable');
+    expect((await other.status()).repair).toBe('blocked');
   });
   it.each(['mime', 'redirect', 'redirected', 'opaque', 'bytes', 'url', 'status'] as const)(
     'rejects %s static responses without damaging the complete predecessor',

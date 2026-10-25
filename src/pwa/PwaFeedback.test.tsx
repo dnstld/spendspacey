@@ -86,6 +86,17 @@ describe('localized static preparation and recovery feedback', () => {
       mock.state.repaired = false;
     },
   );
+  it.each(['en', 'pt-BR'] as const)(
+    'uncontrolled preparation remains explicitly unconfirmed in %s',
+    async (locale) => {
+      await mount(locale);
+      expect(screen.getByTestId('offline-readiness')).toHaveTextContent(
+        locale === 'en'
+          ? 'Prepared for offline verification. This document is not confirmed ready; a controlled document must verify its saved files.'
+          : 'Preparado para uso offline sob verificação. Este documento não está confirmado como pronto; um documento controlado precisa verificar seus arquivos salvos.',
+      );
+    },
+  );
   it.each(['initializing', 'signIn', 'signOut', 'callback'] as const)(
     'blocks repair during %s processing',
     async (pending) => {
