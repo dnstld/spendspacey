@@ -29,6 +29,7 @@ const { resolve, join } = await import('node:path');
 for (const [revision, label] of [
   ['069dbc50f4a34b76fefd2a3eb934388d452a8b5a', 'legacy-069dbc50'],
   ['611994f4e0cae15b4b4ef4ada6659d10ac059a55', 'baseline-611994f'],
+  ['fabde5f3e7c35bae4dcf6b5fc8981e2d7f74a940', 'before-startup-fabde5f'],
 ]) {
   const legacyRoot = mkdtempSync(join(tmpdir(), 'spendspacey-version-'));
   try {

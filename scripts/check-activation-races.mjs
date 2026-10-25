@@ -14,6 +14,7 @@ for (const constrained of [false, true]) {
         'vitest',
         'run',
         'src/pwa/activation.test.ts',
+        'src/pwa/startup.test.ts',
         ...(constrained ? ['--maxWorkers=1'] : []),
       ],
       {

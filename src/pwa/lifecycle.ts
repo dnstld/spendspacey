@@ -82,6 +82,7 @@ async function readiness() {
   const controller = navigator.serviceWorker.controller;
   const worker = controller ?? registration?.active;
   const result: Partial<StaticStatus> = (worker ? await ask(worker, 'HELLO') : undefined) ?? {};
+  if (worker !== (navigator.serviceWorker.controller ?? registration?.active)) return;
   if (
     worker &&
     controller &&
@@ -93,15 +94,18 @@ async function readiness() {
     void ask(worker, 'CONFIRM', result as StaticStatus);
   }
   publish({
-    readiness: result.ready
-      ? controller
-        ? 'ready'
-        : 'prepared'
-      : result.prepared
-        ? 'prepared'
-        : registration?.installing
-          ? 'preparing'
-          : 'unavailable',
+    readiness:
+      result.repair === 'unavailable' || result.repair === 'blocked'
+        ? 'unavailable'
+        : result.ready && result.authority === 'application' && !!result.binding
+          ? controller
+            ? 'ready'
+            : 'prepared'
+          : result.prepared
+            ? 'prepared'
+            : registration?.installing
+              ? 'preparing'
+              : 'unavailable',
     recovery: state.recovery || !!result.pending || (!!controller && result.ready === false),
     repaired: result.repair === 'complete' && result.pending === true,
   });

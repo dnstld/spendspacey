@@ -16,10 +16,11 @@ iPhone**. Choose **Share → Add to Home Screen**, confirm **Spendspacey** and i
 green s-dot icon, then launch from the Home Screen. Confirm standalone presentation.
 Prime that installed context itself online: a Chrome tab may use separate storage.
 
-Wait for “Prepared for offline use. Reload or reopen Spendspacey to finish.” All
-static files and verified completion/selection already exist at this point. The
-next ordinary navigation, reload or installed-app launch acquires control, including
-when that next load is offline. There is no `clients.claim()`, forced activation or
+“Prepared for offline verification” means saved files were verified but this
+document is not confirmed ready. Only a controlled document with a verified
+persisted binding can report readiness. A later navigation must independently
+verify control, ownership and resources; preparation alone does not guarantee
+that reload or reopening will succeed. There is no `clients.claim()`, forced activation or
 automatic reload. Controlled readiness requires persisted document ownership and a
 verified complete inventory. Test an available safe airplane-mode reload control and cold reopen in both
 English and Brazilian Portuguese. Locale detection/preference/fallback, zoom,
@@ -207,7 +208,7 @@ subresources fail closed. When rollback uses imported v2 bytes, canonical entry
 uses embedded recovery because that old UI cannot speak the corrected control
 protocol. Its verified static rollback remains selected/protected and may supply
 a safely bound callback clone; deliberate repair prepares the corrected UI.
-Legacy repair history is refreshed at activation/startup and before repair under
+Legacy repair history is refreshed at ownership transfer and before repair under
 the shared old/new repair lock, including attempts created while a worker waited. Unsupported newer metadata is not reinterpreted. Serving
 verified older static bytes under corrected worker policy is different from
 redeploying an older worker implementation.
@@ -239,7 +240,7 @@ Fault injection, exact generation/controller ownership, repair ordering, failed/
 
 ## Interrupted activation and later installation recovery
 
-Activation-event completion is not a durability guarantee. The corrected worker independently reconciles native browser-active instance identity with the existing v3 ledger before functional events, under the original writer lock and parent/epoch fence. It restores an existing commit or transfers one uniquely eligible completed installation after complete candidate/predecessor verification. It never assigns a binding to an already unbound recovery document. Same-build ambiguous reinstall, unsupported proof or damaged metadata remains unavailable; do not clear storage to bypass these checks.
+Activation-event completion is not a durability guarantee. The corrected worker independently reconciles native browser-active instance identity with the existing v3 ledger before functional events, under the original writer lock and parent/epoch fence. It restores an existing commit or transfers one uniquely eligible completed installation after complete candidate/predecessor verification. It never assigns a binding to an already unbound recovery document. Ambiguous different-owner transfer, unsupported native proof or invalid durable metadata remains unavailable; valid committed same-build restoration is permitted without transferring ownership or associating reservations; do not clear storage to bypass these checks.
 
 For a later separately authorized recovery, first review/verify a distinct corrected worker release and its complete compatible inventory. Preserve the installed app and all origin data. A normal browser update can install that worker while an existing recovery document stays open; normal activation still waits for safe lifecycle conditions. New authorized document navigation can then acquire a fresh binding. No exact sequence or one-reload success is promised before representative migration and hosted checks pass. The old embedded document cannot acquire new script code in place; controller refresh in this correction applies to newly delivered recovery documents. No site-data clearing, reinstall, cache mutation or automatic repair is a recovery mechanism.
 
@@ -253,3 +254,11 @@ normal navigation-triggered soft update while the original recovery stays open,
 followed by normal activation and new-document adoption after all clients close.
 Update scheduling remains browser-owned; this evidence is not a physical-phone
 pass or permission to interact with the currently preserved document.
+
+## Retryable startup and same-build owner restoration
+
+Storage-access rejection is temporary unavailability, distinct from invalid build/configuration and invalid durable metadata. There is one validation flight per worker global under the exclusive writer lock. At most two failed attempts run before a five-second cooldown; only a later eligible event can retry. A two-second response deadline does not cancel the storage operation or release its lock/flight. Hanging/late continuations cannot publish authority or start parallel mutation. No background retry, repair, reload, trust reset, or metadata reconstruction occurs.
+
+A native browser-active worker at the expected origin/root scope can restore its completely validated committed same-build owner epoch/selection without another activation or any reservation association. Independently verify saved resources before application delivery. One/multiple pending same-build reservations are quarantined, retained and protected; cleanup defers. Different-owner transfer still requires unique completed/latest eligible provenance with current parent/head/epoch and immediate native-instance fencing. Repair/adoption selections, document pins/bindings, attempts/spent outcomes and rollback/cutover history remain intact. Missing/corrupt resource bytes never authorize application delivery; valid bound recovery retains deliberate repair eligibility. No schema/protocol migration occurs.
+
+Temporary and invalid saved-state guidance is distinct in English and Brazilian Portuguese; proven resource loss has its own introduction. None promises reopening as a general remedy. Uncontrolled preparation cannot claim offline readiness. This implementation does not authorize any phone action, site-data clearing/reinstallation, production publication or rollback. Preserve the open phone document for independent recovery review. Representative startup/same-build reproductions do not prove the hidden physical trigger.

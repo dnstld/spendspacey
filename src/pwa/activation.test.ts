@@ -26,9 +26,18 @@ describe('restart-resumable browser-active ownership', () => {
     const check = (running: unknown, registered: unknown) =>
       isBrowserActive({
         serviceWorker: running,
-        registration: { active: registered },
+        registration: { active: registered, scope: origin + '/' },
+        location: { origin },
       } as Parameters<typeof isBrowserActive>[0]);
     expect(check(active, active)).toBe(true);
+    for (const scope of [origin + '/other/', 'https://elsewhere.test/', ''])
+      expect(
+        isBrowserActive({
+          serviceWorker: active,
+          registration: { active, scope },
+          location: { origin },
+        } as unknown as Parameters<typeof isBrowserActive>[0]),
+      ).toBe(false);
     expect(check({ ...active }, active)).toBe(false);
     expect(check(null, active)).toBe(false);
     for (const state of ['installed', 'installing', 'redundant']) {
@@ -100,7 +109,7 @@ describe('restart-resumable browser-active ownership', () => {
       expect(status).toMatchObject({
         authority: 'none',
         binding: null,
-        prepared: true,
+        prepared: false,
         ready: false,
       });
     }
@@ -135,7 +144,7 @@ describe('restart-resumable browser-active ownership', () => {
     old.host.active = () => false;
     expect(await old.reconcile()).toBe(false);
   });
-  it('rejects ambiguous, superseded and obsolete same-build reservations', async () => {
+  it('rejects ambiguous and superseded different-owner transfers while restoring committed owners', async () => {
     const { f, candidate } = await replacement();
     const repeated = await f.engine('v2');
     await repeated.install();
@@ -146,7 +155,7 @@ describe('restart-resumable browser-active ownership', () => {
     expect(await repeated.reconcile()).toBe(false);
     const same = await f.engine('v3');
     await same.install();
-    expect(await same.reconcile()).toBe(false);
+    expect(await same.reconcile()).toBe(true);
     const freshRollback = await f.engine('v1');
     await freshRollback.install();
     expect(await freshRollback.reconcile()).toBe(true);

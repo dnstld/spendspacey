@@ -71,3 +71,11 @@ configuration, format/lint/types, secret and strict OpenSpec checks. Exact-head
 Linux CI and deployed preview are reported on the implementation draft PR.
 This does not complete external Tasks 3.2–3.4 or import their separate acceptance
 results. Progress remains **6/9** on this implementation branch.
+
+## Retryable-startup restoration implementation verification
+
+Apply the design/specification correction to completed implementation tasks 1.3, 2.2 and 3.1 without importing external acceptance results. Replace the former blanket same-build refusal: restore a fully validated committed owner without transfer; quarantine unrelated reservations and defer cleanup. Preserve the strict unique-provenance rule for different-owner transfer, native identity/scope fences, immutable document binding, legacy/repair/spent history and fail-closed durable corruption. No ledger/protocol migration is introduced.
+
+Verify source-typed storage rejection, coalesced bounded attempts/cooldown, hangs retaining flight/lock, stale/late continuations, same-global and restarted recovery, uncertain commits, one/multiple quarantined reservations, unchanged repaired/adopted selection, exact missing/reused identities and bilingual recovery/readiness. Require positive application availability in the bilingual representative lifecycle and disposable persistent-process tests. Run the activation/startup and repair-ordering matrices, complete unit/component and no-retry Chromium suites, supplemental WebKit separately, all build/config/integrity/delivery/CSP/Auth-boundary/secret checks and strict OpenSpec validation. Record actual results in verification evidence.
+
+Task 3.4 remains unchecked. This main-derived implementation branch retains 6/9, with external 3.2–3.4 unchecked; the separate acceptance checkout owns its 8/9 state and all production/phone evidence. Do not import or modify it. Neither representative reproduction proves the phone's hidden trigger. Production and the open phone recovery document remain untouched; further recovery needs independent review and authorization.
