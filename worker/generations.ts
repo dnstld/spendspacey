@@ -1062,14 +1062,6 @@ export class Generations {
   private async restoreActivation(authority: () => boolean): Promise<void> {
     if (!authority()) throw new Error('Not the browser-active worker');
     const s = await this.snapshot();
-    const eligible = [...s.records].filter(
-      ([id, r]) =>
-        r.kind === 'reserve' &&
-        r.purpose === 'install' &&
-        r.worker === this.worker &&
-        r.epoch === s.epoch &&
-        !s.chain.some((v) => v.body.kind === 'activate' && v.body.installation === id),
-    );
     if (s.owner === this.worker) {
       // Build equality establishes compatibility, not reservation identity.
       // Restore only the already committed epoch/selection. Pending installations
@@ -1092,16 +1084,29 @@ export class Generations {
       this.epoch = s.epoch;
       return;
     }
+    // Candidate uniqueness comes from validated durable completions, not from
+    // reservations or resource bytes. Incomplete installations remain in the
+    // lineage and in the separate latest-reservation supersession veto below.
+    const eligible = s.chain.flatMap(({ id, body }) => {
+      if (body.kind !== 'complete') return [];
+      const reservation = s.records.get(body.reservation);
+      if (
+        reservation?.kind !== 'reserve' ||
+        reservation.purpose !== 'install' ||
+        reservation.worker !== this.worker ||
+        reservation.epoch !== s.epoch ||
+        s.chain.some((v) => v.body.kind === 'activate' && v.body.installation === body.reservation)
+      )
+        return [];
+      return [{ installation: body.reservation, completion: id }];
+    });
     if (eligible.length !== 1) throw new Error('No unique fenced installation');
     const install = eligible[0];
     const latest = [...s.records]
       .filter(([, r]) => r.kind === 'reserve' && r.purpose === 'install' && r.epoch === s.epoch)
       .at(-1);
-    if (latest?.[0] !== install[0]) throw new Error('Superseded installation');
-    const candidate =
-      [...s.records].find(([, r]) => r.kind === 'complete' && r.reservation === install[0])?.[0] ??
-      null;
-    if (!candidate) throw new Error('No completed installation');
+    if (latest?.[0] !== install.installation) throw new Error('Superseded installation');
+    const candidate = install.completion;
     const prior = s.selection?.body;
     const previous =
       prior && (prior.kind === 'activate' || prior.kind === 'deliver') ? prior.selected : null;
@@ -1129,7 +1134,7 @@ export class Generations {
     const nextEpoch = crypto.randomUUID();
     await this.append(
       s,
-      { kind: 'activate', installation: install[0], selected, fallback, nextEpoch },
+      { kind: 'activate', installation: install.installation, selected, fallback, nextEpoch },
       true,
       authority,
     );
