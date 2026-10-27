@@ -1390,3 +1390,374 @@ for (const termination of ['graceful', 'abrupt'] as const) {
     }
   });
 }
+
+// Failed installs leave durable reservations. Retry the exact same served worker
+// bytes, using native lifecycle events rather than manufacturing ledger records.
+async function updateOutcome(page: Page) {
+  return page.evaluate(async () => {
+    const registration = (await navigator.serviceWorker.getRegistration())!;
+    const outcome = new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('install outcome missing')), 20000);
+      registration.addEventListener(
+        'updatefound',
+        () => {
+          const worker = registration.installing!;
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed' || worker.state === 'redundant') {
+              clearTimeout(timer);
+              resolve(worker.state);
+            }
+          });
+        },
+        { once: true },
+      );
+    });
+    await registration.update();
+    return outcome;
+  });
+}
+const completionFault = (point: string) => `
+const nativePut = Cache.prototype.put, nativeMatch = Cache.prototype.match;
+let interruptedKey = '';
+Cache.prototype.put = async function(request, response) {
+  const key = typeof request === 'string' ? request : request.url;
+  if (new URL(key, self.location.origin).pathname.startsWith('/__spendspacey_ownership_v3__/') && (await response.clone().json()).body.kind === 'complete') {
+    const marker = await caches.open('disposable-completion-ack-fault');
+    if (!(await marker.match(self.location.origin + '/spent'))) {
+      await marker.put(self.location.origin + '/spent', new Response('synthetic-only'));
+      if (${JSON.stringify(point)} === 'beforePut') throw Error('synthetic completion before write');
+      await nativePut.call(this, request, response);
+      if (${JSON.stringify(point)} === 'readback') { interruptedKey = key; return; }
+      throw Error('synthetic completion after write');
+    }
+  }
+  return nativePut.call(this, request, response);
+};
+Cache.prototype.match = async function(request, options) {
+  const key = typeof request === 'string' ? request : request.url;
+  if (key === interruptedKey) { interruptedKey = ''; throw new DOMException('synthetic completion readback', 'UnknownError'); }
+  return nativeMatch.call(this, request, options);
+};
+`;
+for (const locale of ['en', 'pt-BR'])
+  for (const fixed of [false, true])
+    test(`completion-first identical-worker failed install/retry/cold adoption ${locale} fixed=${fixed}`, async ({
+      page,
+      context,
+    }) => {
+      const host = await pwaServer();
+      const outside: string[] = [];
+      context.on('request', (request) => {
+        if (new URL(request.url()).origin !== host.origin) outside.push('outside');
+      });
+      try {
+        host.state.directory = '.cache/installable-offline-shell/v1';
+        await prepared(page, host.origin);
+        await page.getByRole('combobox').selectOption(locale);
+        const pin = (await message(page, 'STATUS')).binding;
+        host.state.directory = fixed
+          ? '.cache/installable-offline-shell/v2'
+          : '.cache/installable-offline-shell/before-completion-first-967a2b6';
+        const workerBytes = await (await context.request.get(host.origin + '/sw.js')).body();
+        host.state.broken = true;
+        // Multiple older reservations are deliberately retained, never expired.
+        for (let attempt = 0; attempt < 2; attempt++)
+          expect(await updateOutcome(page)).toBe('redundant');
+        host.state.broken = false;
+        expect(await updateOutcome(page)).toBe('installed');
+        expect(await (await context.request.get(host.origin + '/sw.js')).body()).toEqual(
+          workerBytes,
+        );
+        const staged = await records(page);
+        const latest = staged
+          .filter((r) => r.body.kind === 'reserve' && r.body.purpose === 'install')
+          .sort((a, b) => Number(a.body.sequence) - Number(b.body.sequence))
+          .at(-1)!;
+        const candidate = staged.find(
+          (r) => r.body.kind === 'complete' && r.body.reservation === latest.id,
+        )!;
+        expect(
+          staged.filter((r) => r.body.kind === 'reserve' && r.body.worker === latest.body.worker),
+        ).toHaveLength(3);
+        expect(
+          staged.filter((r) => r.body.kind === 'complete' && r.body.worker === latest.body.worker),
+        ).toHaveLength(1);
+        await page.close();
+        let cold = await context.newPage();
+        await disableHttpCache(cold);
+        expect((await cold.goto(host.origin))!.fromServiceWorker()).toBe(true);
+        if (!fixed) {
+          await expect(
+            cold.getByRole('heading', { name: /Spendspacey recovery|Recuperação do Spendspacey/ }),
+          ).toBeVisible();
+          expect(await message(cold, 'STATUS')).toMatchObject({
+            authority: 'none',
+            binding: null,
+            ready: false,
+          });
+          await expect(
+            cold.getByRole('button', { name: /Repair online|Reparar com conexão/, exact: true }),
+          ).toBeDisabled();
+          const requests = host.state.requests.length;
+          await cold.waitForTimeout(150);
+          expect(host.state.requests).toHaveLength(requests);
+          expect((await records(cold)).filter((r) => r.body.kind === 'activate')).toHaveLength(1);
+          expect(
+            (await records(cold)).some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal'),
+          ).toBe(false);
+        } else {
+          await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+          await expect(cold.getByTestId('offline-readiness')).toContainText(
+            /ready for offline|pronta para uso offline/,
+          );
+          const status = await message(cold, 'STATUS');
+          expect(status).toMatchObject({
+            authority: 'application',
+            ready: true,
+            generation: candidate.id,
+          });
+          const committed = await records(cold);
+          expect(
+            committed.some(
+              (r) =>
+                r.id === status.binding &&
+                r.body.kind === 'deliver' &&
+                r.body.selected === candidate.id,
+            ),
+          ).toBe(true);
+          expect(committed.some((r) => r.id === pin)).toBe(true);
+          const activation = committed
+            .filter((r) => r.body.kind === 'activate')
+            .sort((a, b) => Number(a.body.sequence) - Number(b.body.sequence))
+            .at(-1)!;
+          expect(activation.body).toMatchObject({
+            installation: latest.id,
+            selected: candidate.id,
+          });
+          const epoch = status.epoch;
+          await cold.close();
+          await stopWorkers(context);
+          cold = await context.newPage();
+          await disableHttpCache(cold);
+          await cold.goto(host.origin);
+          expect(await message(cold, 'STATUS')).toMatchObject({
+            ready: true,
+            epoch,
+            generation: candidate.id,
+          });
+          await expect(cold.getByRole('combobox')).toHaveValue(locale);
+          await setOffline(context, true);
+          await cold.close();
+          await stopWorkers(context);
+          cold = await context.newPage();
+          await disableHttpCache(cold, true);
+          await cold.goto(host.origin);
+          await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+          await expect(cold.getByRole('combobox')).toHaveValue(locale);
+          expect(await message(cold, 'STATUS')).toMatchObject({
+            authority: 'application',
+            ready: true,
+            epoch,
+            generation: candidate.id,
+          });
+          const after = await records(cold);
+          expect(after.filter((r) => r.body.kind === 'activate')).toHaveLength(2);
+          expect(staged.every((r) => after.some((a) => a.id === r.id))).toBe(true);
+          expect(after.some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal')).toBe(
+            false,
+          );
+        }
+        expect(outside).toEqual([]);
+        expect(host.state.privateRequests).toBe(0);
+      } finally {
+        await setOffline(context, false);
+        await host.close();
+      }
+    });
+for (const point of ['beforePut', 'afterPut', 'readback'])
+  test(`completion durability is independent of install acknowledgement: ${point}`, async ({
+    page,
+    context,
+  }) => {
+    const host = await pwaServer();
+    const outside: string[] = [];
+    context.on('request', (request) => {
+      if (new URL(request.url()).origin !== host.origin) outside.push('outside');
+    });
+    try {
+      host.state.directory = '.cache/installable-offline-shell/v1';
+      await prepared(page, host.origin);
+      host.state.directory = '.cache/installable-offline-shell/v2';
+      host.state.workerPrefix = completionFault(point);
+      expect(await updateOutcome(page)).toBe('redundant');
+      const failed = await records(page);
+      expect(failed.filter((r) => r.body.kind === 'complete')).toHaveLength(
+        point === 'beforePut' ? 1 : 2,
+      );
+      expect(await updateOutcome(page)).toBe('installed');
+      await page.close();
+      const cold = await context.newPage();
+      await disableHttpCache(cold);
+      await cold.goto(host.origin);
+      if (point === 'beforePut') {
+        await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+        expect(await message(cold, 'STATUS')).toMatchObject({
+          authority: 'application',
+          ready: true,
+        });
+      } else {
+        await expect(cold.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+        expect(await message(cold, 'STATUS')).toMatchObject({
+          authority: 'none',
+          binding: null,
+          ready: false,
+        });
+        await expect(
+          cold.getByRole('button', { name: 'Repair online', exact: true }),
+        ).toBeDisabled();
+        const requests = host.state.requests.length;
+        await cold.waitForTimeout(150);
+        expect(host.state.requests).toHaveLength(requests);
+      }
+      const after = await records(cold);
+      expect(after.filter((r) => r.body.kind === 'activate')).toHaveLength(
+        point === 'beforePut' ? 2 : 1,
+      );
+      expect(failed.every((r) => after.some((a) => a.id === r.id))).toBe(true);
+      expect(after.some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal')).toBe(false);
+      expect(outside).toEqual([]);
+      expect(host.state.privateRequests).toBe(0);
+    } finally {
+      await setOffline(context, false);
+      await host.close();
+    }
+  });
+
+test('completion-first uniqueness does not override a newer incomplete reservation', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  try {
+    host.state.directory = '.cache/installable-offline-shell/v1';
+    await prepared(page, host.origin);
+    const pin = (await message(page, 'STATUS')).binding;
+    host.state.directory = '.cache/installable-offline-shell/v2';
+    host.state.workerPrefix = '// first completed native installation\n';
+    expect(await updateOutcome(page)).toBe('installed');
+    host.state.workerPrefix = '// later incomplete native installation\n';
+    host.state.broken = true;
+    expect(await updateOutcome(page)).toBe('redundant');
+    host.state.broken = false;
+    host.state.workerPrefix = '// first completed native installation\n';
+    const staged = await records(page);
+    const reserves = staged
+      .filter((r) => r.body.kind === 'reserve' && r.body.purpose === 'install')
+      .sort((a, b) => Number(a.body.sequence) - Number(b.body.sequence));
+    expect(reserves).toHaveLength(3);
+    expect(
+      staged.some((r) => r.body.kind === 'complete' && r.body.reservation === reserves[1].id),
+    ).toBe(true);
+    expect(
+      staged.some((r) => r.body.kind === 'complete' && r.body.reservation === reserves[2].id),
+    ).toBe(false);
+    await page.close();
+    const cold = await context.newPage();
+    await disableHttpCache(cold);
+    expect((await cold.goto(host.origin))!.fromServiceWorker()).toBe(true);
+    await expect(cold.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+    expect(await message(cold, 'STATUS')).toMatchObject({
+      authority: 'none',
+      binding: null,
+      ready: false,
+    });
+    const after = await records(cold);
+    expect(after.filter((r) => r.body.kind === 'activate')).toHaveLength(1);
+    expect(after.some((r) => r.id === pin)).toBe(true);
+    expect(staged.every((r) => after.some((a) => a.id === r.id))).toBe(true);
+    expect(after.some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal')).toBe(false);
+    expect(host.state.privateRequests).toBe(0);
+  } finally {
+    await host.close();
+  }
+});
+for (const termination of ['graceful', 'abrupt'])
+  test(`completion-first retained profile cold adoption after ${termination} process termination`, async () => {
+    test.setTimeout(90000);
+    const profile = await mkdtemp(join(tmpdir(), 'spendspacey-completion-first-'));
+    let context = await chromium.launchPersistentContext(profile, { headless: true });
+    const host = await pwaServer();
+    const outside: string[] = [];
+    const guard = (c: BrowserContext) =>
+      c.on('request', (request) => {
+        if (new URL(request.url()).origin !== host.origin) outside.push('outside');
+      });
+    guard(context);
+    try {
+      host.state.directory = '.cache/installable-offline-shell/v1';
+      let page = await context.newPage();
+      await prepared(page, host.origin);
+      await page.getByRole('combobox').selectOption('pt-BR');
+      // Establish locale on disk through a prior normal lifetime. SIGKILL is
+      // testing worker/ledger durability, not Chromium's deferred preference flush.
+      if (termination === 'abrupt') {
+        await context.close();
+        context = await chromium.launchPersistentContext(profile, { headless: true });
+        guard(context);
+        page = await context.newPage();
+        await page.goto(host.origin);
+        await expect(page.getByRole('combobox')).toHaveValue('pt-BR');
+      }
+      const pin = (await message(page, 'STATUS')).binding;
+      host.state.directory = '.cache/installable-offline-shell/v2';
+      host.state.broken = true;
+      expect(await updateOutcome(page)).toBe('redundant');
+      host.state.broken = false;
+      expect(await updateOutcome(page)).toBe('installed');
+      if (termination === 'graceful') await context.close();
+      else {
+        // Only the dedicated disposable process, located by its exact profile.
+        const { execFileSync } = await import('node:child_process');
+        const entries = execFileSync('ps', ['-axo', 'pid=,args='], { encoding: 'utf8' }).split(
+          '\n',
+        );
+        const processRow = entries.find(
+          (row) => row.includes(`--user-data-dir=${profile}`) && !row.includes('--type='),
+        );
+        expect(processRow).toBeTruthy();
+        process.kill(Number(processRow!.trim().split(/\s+/)[0]), 'SIGKILL');
+        await expect.poll(() => context.browser()?.isConnected() ?? false).toBe(false);
+      }
+      context = await chromium.launchPersistentContext(profile, { headless: true });
+      guard(context);
+      page = await context.newPage();
+      await disableHttpCache(page);
+      await page.goto(host.origin);
+      await expect(page.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+      await expect(page.getByRole('combobox')).toHaveValue('pt-BR');
+      const status = await message(page, 'STATUS');
+      expect(status).toMatchObject({ authority: 'application', ready: true });
+      expect((await records(page)).some((r) => r.id === pin)).toBe(true);
+      await context.close();
+      context = await chromium.launchPersistentContext(profile, { headless: true, offline: true });
+      guard(context);
+      page = await context.newPage();
+      await disableHttpCache(page, true);
+      await page.goto(host.origin);
+      await expect(page.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
+      expect(await message(page, 'STATUS')).toMatchObject({
+        ready: true,
+        epoch: status.epoch,
+        generation: status.generation,
+      });
+      const after = await records(page);
+      expect(after.filter((r) => r.body.kind === 'activate')).toHaveLength(2);
+      expect(after.some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal')).toBe(false);
+      expect(outside).toEqual([]);
+      expect(host.state.privateRequests).toBe(0);
+    } finally {
+      await context.close();
+      await host.close();
+      await rm(profile, { recursive: true, force: true });
+    }
+  });

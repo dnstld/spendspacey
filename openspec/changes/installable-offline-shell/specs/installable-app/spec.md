@@ -262,7 +262,7 @@ A browser-active worker SHALL resume interrupted ownership independently of acti
 - **AND** build equality proves compatibility only, not worker-instance or registration/reservation identity; no schema/protocol migration or safety-history reset occurs
 
 #### Scenario: Different-owner transfer remains ambiguous
-- **WHEN** ownership differs and the current validated lineage has multiple eligible reservations, a superseded reservation or no unique completed installation provenance
+- **WHEN** ownership differs and the current validated lineage has multiple completed eligible pairs, a superseded reservation or no unique completed installation provenance
 - **THEN** fail closed without transfer, repair, cleanup or reconstruction from resource bytes
 - **AND** waiting, stale, redundant, incompatible, corrupt and forked candidates cannot mutate
 
@@ -305,3 +305,27 @@ The worker SHALL distinguish immutable build/configuration failure, retryable st
 - **WHEN** disposable tests execute unbound recovery, one reload still in recovery, full close/reopen into application, locale change, then another cold reopen with one transient startup read rejection
 - **THEN** the corrected implementation must display a working application with healthy retained state in both languages, preserving owner epoch, selection and old bindings
 - **AND** regression evidence distinguishes pre-correction failure from corrected availability without claiming physical iPhone acceptance or its hidden trigger
+
+### Requirement: Different-owner activation eligibility is completion-first
+
+Under the existing writer lock and full-lineage validation, different-owner activation SHALL require exactly one eligible completion/reservation pair before resource-health selection. A separate gate SHALL require its reservation to be the latest installation reservation in the epoch, including incomplete reservations.
+
+#### Scenario: Failed install then identical-build successful retry
+- **WHEN** one or multiple older incomplete reservations precede one completed latest eligible installation
+- **THEN** the browser-active replacement can reconcile, bind and deliver a working application, and restore its committed epoch after restart in both languages online/offline
+- **AND** activation associates the pair’s reservation ID and selects resources through its completion ID
+- **AND** retain the incomplete reservations/resources, predecessor pins, repair/spent history and cleanup seals without another activation on restoration
+
+#### Scenario: Uniqueness does not override supersession
+- **WHEN** a unique completed candidate has a newer incomplete installation reservation in the same epoch, including one preceding a delayed older completion
+- **THEN** reject transfer as superseded; do not select the newest reservation, infer completion from bytes or delete history
+
+#### Scenario: Completion acknowledgement is not durable truth
+- **WHEN** completion persistence or read-back is interrupted
+- **THEN** authoritative full revalidation counts every valid persisted completion, including unacknowledged writes, and counts no absent completion
+- **AND** multiple eligible completed pairs remain blocked regardless of differing resource health; delayed settlement retains the writer lock and cannot duplicate activation/publication
+
+#### Scenario: Full validation and existing safety gates remain mandatory
+- **WHEN** lineage/provenance is malformed, forked, unsupported, incompatible, stale, ambiguous or loses native authority/head/parent/epoch fencing
+- **THEN** fail closed without ignoring incomplete/malformed records, automatic repair/reload, unsafe cleanup, data clearing or reinstallation
+- **AND** committed-owner restoration, exact browser-issued binding/read-back before bytes, retention/history, recovery isolation and Auth/privacy boundaries remain unchanged without schema/protocol migration

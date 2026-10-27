@@ -18,6 +18,7 @@ const keys = CacheStorage.prototype.keys; CacheStorage.prototype.keys = async fu
  if (cold && !injected) { injected = true; throw new DOMException('synthetic temporary access', 'UnknownError'); }
  return keys.call(this);
 }; self.addEventListener('message', e => { if(e.data === 'NATIVE_PROOF' && e.ports[0]) e.ports[0].postMessage({ active: self.registration.active === self.serviceWorker, state: self.serviceWorker?.state, scope: self.registration.scope, origin: self.location.origin, injected }); });\n`;
+const delivery = { directory: 'dist', broken: false };
 const server = createServer((request, response) => {
   void (async () => {
     const path = new URL(request.url, 'http://localhost').pathname;
@@ -27,11 +28,19 @@ const server = createServer((request, response) => {
       return;
     }
     const file = path === '/' || path === '/auth/callback' ? 'index.html' : path.slice(1);
-    const bytes = await readFile(resolve('dist', file)).catch(() => readFile('dist/index.html'));
+    if (delivery.broken && /^assets\/index-.*\.js$/.test(file)) {
+      response
+        .writeHead(200, { 'content-type': 'text/html' })
+        .end('synthetic incomplete installation');
+      return;
+    }
+    const bytes = await readFile(resolve(delivery.directory, file)).catch(() =>
+      readFile(resolve(delivery.directory, 'index.html')),
+    );
     response
       .writeHead(200, {
         'content-type': types[file.slice(file.lastIndexOf('.'))] ?? 'text/html',
-        ...pagesHeadersFor('dist', path),
+        ...pagesHeadersFor(delivery.directory, path),
       })
       .end(file === 'sw.js' ? Buffer.concat([Buffer.from(prefix), bytes]) : bytes);
   })().catch(() => response.writeHead(500).end());
@@ -148,6 +157,108 @@ try {
     for (const document of context.pages()) await document.close();
     await context.close();
     context = undefined;
+  }
+  // Separate disposable profiles exercise native failed install -> byte-identical
+  // retry -> activation -> process restart. No metadata or account fixtures are
+  // edited to manufacture completion; the real installation pipeline writes it.
+  for (const locale of ['en', 'pt-BR']) {
+    const retryProfile = await mkdtemp(join(tmpdir(), 'spendspacey-completion-webkit-'));
+    try {
+      delivery.directory = '.cache/installable-offline-shell/v1';
+      context = await webkit.launchPersistentContext(retryProfile, { headless: true });
+      const observe = (c) =>
+        c.on('request', (request) => {
+          if (new URL(request.url()).origin !== origin)
+            unexpected.push('unexpected external request');
+        });
+      observe(context);
+      let page = await context.newPage();
+      await page.goto(origin);
+      await page
+        .getByTestId('offline-readiness')
+        .filter({ hasText: 'Prepared for offline' })
+        .waitFor({ timeout: 20000 });
+      await page.reload();
+      await ready(page);
+      const original = await hello(page);
+      await page.getByRole('combobox').selectOption(locale);
+      delivery.directory = '.cache/installable-offline-shell/v2';
+      const update = () =>
+        page.evaluate(async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          const state = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(Error('missing native install result')), 20000);
+            registration.addEventListener(
+              'updatefound',
+              () => {
+                const worker = registration.installing;
+                worker.addEventListener('statechange', () => {
+                  if (worker.state === 'installed' || worker.state === 'redundant') {
+                    clearTimeout(timeout);
+                    resolve(worker.state);
+                  }
+                });
+              },
+              { once: true },
+            );
+          });
+          await registration.update();
+          return state;
+        });
+      delivery.broken = true;
+      assert.equal(await update(), 'redundant');
+      delivery.broken = false;
+      assert.equal(await update(), 'installed');
+      await page.close();
+      await context.close();
+      context = await webkit.launchPersistentContext(retryProfile, { headless: true });
+      observe(context);
+      page = await context.newPage();
+      await page.goto(origin);
+      await ready(page);
+      assert.equal(await page.locator('html').getAttribute('data-synthetic-version'), 'v2');
+      assert.equal(await page.getByRole('combobox').inputValue(), locale);
+      const committed = await hello(page);
+      assert.equal(committed.ready, true);
+      assert.notEqual(committed.epoch, original.epoch);
+      const ledger = await page.evaluate(async () => {
+        const cache = await caches.open('spendspacey-static-ownership-v3');
+        return Promise.all(
+          (await cache.keys()).map(async (key) => (await cache.match(key)).json()),
+        );
+      });
+      assert.equal(ledger.filter((r) => r.body.kind === 'activate').length, 2);
+      assert(ledger.some((r) => r.id === original.binding));
+      assert(!ledger.some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal'));
+      await context.close();
+      context = await webkit.launchPersistentContext(retryProfile, {
+        headless: true,
+        offline: true,
+      });
+      observe(context);
+      page = await context.newPage();
+      await page.goto(origin);
+      await ready(page);
+      assert.equal(await page.locator('html').getAttribute('data-synthetic-version'), 'v2');
+      assert.equal(await page.getByRole('combobox').inputValue(), locale);
+      const offline = await hello(page);
+      assert.equal(offline.ready, true);
+      assert.equal(offline.epoch, committed.epoch);
+      assert.equal(offline.generation, committed.generation);
+      rounds.push({
+        completionFirst: true,
+        locale,
+        profileLifetimes: 3,
+        onlineOfflineWorkingApplication: true,
+        retainedPredecessorBinding: true,
+        version: context.browser()?.version(),
+      });
+    } finally {
+      delivery.broken = false;
+      await context?.close();
+      context = undefined;
+      await rm(retryProfile, { recursive: true, force: true });
+    }
   }
   assert.deepEqual(unexpected, []);
   await mkdir('.cache', { recursive: true });
