@@ -8,12 +8,13 @@ Let a user enter and leave Spendspacey through Google authentication, restore an
 
 ### Requirement: Minimal authentication views
 
-The application SHALL show Spendspacey identity, a language selector, and a Google sign-in button when signed out. When signed in, it SHALL show only the user's Google name, email, avatar, language selector, and sign-out button, plus necessary loading and error feedback.
+The application SHALL show Spendspacey identity, language selection, and Google sign-in when signed out. When signed in, it SHALL show only Google name, email, avatar, language selection, and sign-out, plus necessary authentication, connection, installation, and update feedback. No expense content, dashboard, editable profile, extra login method, or application profile query SHALL be introduced by the shell.
 
 #### Scenario: Signed-out entry
 - **WHEN** session initialization completes without a session
 - **THEN** the signed-out view shows Spendspacey identity, language selection, and Google sign-in
 - **AND** it shows no expense content, dashboard, editable profile, or other login method
+- **AND** necessary PWA and connection feedback can appear
 
 #### Scenario: Signed-in entry
 - **WHEN** a session exists with Google identity information
@@ -41,7 +42,7 @@ Google sign-in SHALL use a full-page authorization-code flow with PKCE. The manu
 
 ### Requirement: Callback completion and recovery
 
-The callback SHALL consume a valid authorization code at most once per page runtime, establish the returned session, and replace the callback URL with `/` on success. Callback failures SHALL offer localized recovery without exposing raw provider messages or authentication parameters.
+The callback SHALL consume a valid authorization code at most once per page runtime, establish the returned session, and replace the callback URL with `/` on success. Callback failures SHALL offer localized recovery without exposing raw provider messages or authentication parameters. Offline callback handling SHALL NOT persist or automatically replay a code.
 
 #### Scenario: Successful callback
 - **WHEN** the callback receives a valid code and matching browser verifier
@@ -61,6 +62,12 @@ The callback SHALL consume a valid authorization code at most once per page runt
 - **WHEN** the exchange fails because the authentication service cannot be reached
 - **THEN** the callback exits its pending state with a localized recovery action
 - **AND** it does not automatically retry a potentially consumed code
+
+#### Scenario: Controlled offline callback navigation
+- **WHEN** `/auth/callback` opens offline after static preparation
+- **THEN** the generic shell shows localized connection/recovery feedback and scrubs query parameters and fragments
+- **AND** a known-offline exchange is not started and the code is neither persisted nor replayed after reconnecting
+- **AND** callback failure alone does not erase an otherwise valid existing SDK session
 
 ### Requirement: Session restoration is ordered with authentication changes
 
@@ -177,3 +184,37 @@ The shell SHALL provide keyboard-operable controls, accessible control names, vi
 - **WHEN** a user navigates the shell by keyboard at a narrow viewport
 - **THEN** language and authentication actions remain visible, focusable, and usable without horizontal overflow
 - **AND** status and error feedback is available to assistive technology
+
+### Requirement: Fresh authentication requires connectivity
+
+Fresh Google sign-in and current-session sign-out SHALL require connectivity. Offline feedback SHALL be localized and recoverable. Reconnection SHALL NOT automatically start OAuth, code exchange, or sign-out, and browser connectivity indicators SHALL be treated as hints rather than proof that Auth is reachable.
+
+#### Scenario: Authentication action requested offline
+- **WHEN** the shell is known to be offline
+- **THEN** sign-in/sign-out actions explain the connection requirement without claiming success, queuing operations, or knowingly navigating into unavailable OAuth
+- **AND** explicit connection retry remains possible and language choice is preserved
+
+#### Scenario: Reported online connection cannot reach Auth
+- **WHEN** the browser reports connectivity but an authentication request fails
+- **THEN** localized failure/retry feedback follows actual SDK session state
+- **AND** cleared local state is not represented as confirmed server revocation and no operation is automatically replayed
+
+### Requirement: Offline shell launch does not require completed authentication
+
+The localized static shell and language selector SHALL remain usable when session restoration needs unavailable network access. The application SHALL give bounded connection/retry feedback rather than an indefinite blocking spinner, without treating restoration failure as confirmed sign-out or copying SDK identity into a new offline store.
+
+#### Scenario: Expired or unavailable session on offline launch
+- **WHEN** a prepared shell reloads offline and SDK restoration/refresh cannot complete
+- **THEN** the user can see the shell and change language while receiving reconnect guidance
+- **AND** no fresh authentication, durable profile availability, or current server verification is claimed
+- **AND** later SDK results still obey existing ordering and cleanup rules
+
+#### Scenario: Independent recovery has no authentication authority
+- **WHEN** the worker serves embedded canonical recovery
+- **THEN** it does not import/execute Auth, inspect SDK storage or make Auth/API requests
+- **AND** callback clones require their own committed generation binding, retain no-store/no-referrer and fail closed without a verified document; no callback cleanup is claimed without application execution
+
+#### Scenario: Existing callback route forms execute cleanup with document ownership
+- **WHEN** a controlled navigation matches the application's existing case-insensitive, trailing-slash or encoded-segment callback route
+- **THEN** a verified selected canonical document clone receives its own committed binding before delivery, retaining no-store/no-referrer and application-owned URL cleanup
+- **AND** no callback URL, query, fragment or sensitive input enters metadata, cache keys, logs or generated artifacts; unrecognized paths receive no worker fallback

@@ -1,7 +1,7 @@
 > **Superseded planning record — 2026-10-17.** Do not apply this combined change or synchronize its historical deltas. It has not been implemented or accepted. Use the four sequential replacement changes below; each owns its own implementation, tests, publication, and acceptance.
 >
 > 1. [deploy-auth-shell](../archive/2026-10-19-deploy-auth-shell/proposal.md): publish the existing auth shell and verify online phone sign-in/sign-out.
-> 2. [installable-offline-shell](../installable-offline-shell/proposal.md): install and launch the static shell offline before profile work.
+> 2. [installable-offline-shell](../archive/2026-10-29-installable-offline-shell/proposal.md): install and launch the static shell offline before profile work.
 > 3. [online-profiles](../online-profiles/proposal.md): one explicitly owner-filtered read of the **current user's own profile**, kept only in memory.
 > 4. [offline-profiles](../offline-profiles/proposal.md): persist **only that current-user profile** with account isolation, reconnection, and cleanup.
 >

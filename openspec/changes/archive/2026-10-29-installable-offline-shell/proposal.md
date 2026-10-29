@@ -6,7 +6,7 @@ After the existing auth shell is published, the PM should be able to install it 
 
 ## What Changes
 
-- Sequence **2 of 4**; requires [deploy-auth-shell](../archive/2026-10-19-deploy-auth-shell/proposal.md) implemented, accepted on the phone, and its durable specs synchronized before apply.
+- Sequence **2 of 4**; requires [deploy-auth-shell](../2026-10-19-deploy-auth-shell/proposal.md) implemented, accepted on the phone, and its durable specs synchronized before apply.
 - Add stable manifest identity, ordinary/maskable/Apple icons, matching colors, standalone display, and mobile metadata.
 - Derive canonical `/` revision/integrity from emitted `index.html`; never precache `/index.html` or accept redirects. Complete preparation on the first online visit, then acquire control on the next ordinary load, including offline, without automatic reload.
 - Bind every delivered application document to its browser-issued client identity before bytes are released; new navigations/reloads may adopt repaired files while existing documents retain their version. Embed independent bilingual recovery with no Auth initialization or network HTML fallback.
@@ -15,7 +15,7 @@ After the existing auth shell is published, the PM should be able to install it 
 - Keep Supabase/API/OAuth/avatar responses, authentication parameters, and user information out of service-worker caches. A controlled callback can receive generic static shell bytes without caching its URL or response.
 - Define offline authentication/connection guidance, first-ever offline limits, normal waiting updates, owned cache versioning, and bounded online recovery.
 - Retain Cloudflare Pages Free static delivery, native SPA fallback, exact production/local callbacks, disabled new-user signups, and restricted preview authentication. Publish only accepted changes merged into `main` at the assigned production `*.pages.dev` origin.
-- Extend focused Chromium/build/CI checks and publish at that existing origin. Require manual PM evidence on an iPhone: open the production Pages URL in Google Chrome, use Share → Add to Home Screen, confirm Spendspacey name/icon, and launch from the Home Screen as a standalone web app. Complete the online/offline/update checks in that installed app and record tested iOS and Chrome versions; desktop Chromium automation cannot replace this evidence.
+- Extend focused Chromium/build/CI checks and publish at that existing origin. Under the [2026-10-28 bootstrap acceptance reset](design.md#pm-acceptance-scope-reset--2026-10-28), require manual PM evidence from a fresh installation on the existing iPhone: open canonical production in Chrome, use Share → Add to Home Screen, confirm Spendspacey name/icon and standalone launch, and complete the revised bilingual online/offline/reconnect checklist after independent contract approval and recorded legacy removal. Record actual iOS/Chrome versions; desktop automation cannot replace these fresh physical checks. Existing representative technical evidence may satisfy update/lifecycle requirements; a future ordinary-update PM smoke does not block bootstrap completion. All historical phone results remain preserved.
 
 Use standards and feature detection without browser detection. Safari-specific manual acceptance is not required.
 
@@ -37,4 +37,4 @@ The existing localization contract applies to all new application text without a
 
 Vite/build configuration, browser service-worker registration, icons/manifest, small auth/feedback integration, Cloudflare Pages static worker/manifest headers, tests, and installation/worker-aware rollback documentation. Proposed tooling is pinned compatible `vite-plugin-pwa` plus directly imported Workbox modules; no data library is needed.
 
-This split is the installation portion of [the preserved combined plan](../ship-installable-offline-profiles/proposal.md). Completion unblocks [online-profiles](../online-profiles/proposal.md); the iPhone/Chrome installation milestone is accepted before that query work begins. Changes 3/4 inherit the installed Home Screen context and versioned manual evidence.
+This split is the installation portion of [the preserved combined plan](../../ship-installable-offline-profiles/proposal.md). Completion unblocks [online-profiles](../../online-profiles/proposal.md); the iPhone/Chrome installation milestone is accepted before that query work begins. Changes 3/4 inherit the installed Home Screen context and versioned manual evidence.

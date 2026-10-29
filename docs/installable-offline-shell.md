@@ -1,12 +1,14 @@
 # Installable offline shell
 
 This is change 2/4, `installable-offline-shell`, on top of the archived, synchronized
-and accepted `deploy-auth-shell`. The production/main baseline was
+and accepted `deploy-auth-shell`. The original production/main baseline was
 `d786441215a1c9e6fb2d048262fc4d09b5d79e44`.
 [Predecessor acceptance](deploy-auth-shell-acceptance.md) remains authoritative for
 provider configuration, disabled signups and canonical authentication. This change
 adds only a static PWA shell. There are no profile requests, database changes,
 private offline stores, queues, Functions, Workers, domains or runtime services.
+
+> **Accepted bootstrap contract — PM decision 2026-10-28; completed 2026-10-29 (9/9).** Use the [fresh-install Task 3.4 checklist](#task-34--fresh-install-bootstrap-acceptance-2026-10-28), baseline merge `2acaa960863024419cb1f22166cd1d9c66e8640b`, worker `124f91385e65e2db4091059a230ae9ccb2991cebff01d3047e29015269c1086b`. Earlier same-installation recovery/update/rollback procedures are retained as superseded history, not current instructions. No phone action is authorized during this planning revision.
 
 ## Install and prepare
 
@@ -22,8 +24,11 @@ persisted binding can report readiness. A later navigation must independently
 verify control, ownership and resources; preparation alone does not guarantee
 that reload or reopening will succeed. There is no `clients.claim()`, forced activation or
 automatic reload. Controlled readiness requires persisted document ownership and a
-verified complete inventory. Test an available safe airplane-mode reload control and cold reopen in both
-English and Brazilian Portuguese. Locale detection/preference/fallback, zoom,
+verified complete inventory. For the fresh-install checklist, test offline reload
+with a safe normal control and full cold reopen in both English and Brazilian Portuguese.
+If no safe reload control exists, record unavailable/not tested and use the approved
+combined route: bilingual physical cold reopen plus separate automated/real-worker
+reload evidence. Do not use phone developer tooling or invent a physical reload pass. Locale detection/preference/fallback, zoom,
 safe areas and existing authentication feedback remain available.
 
 The stable manifest id/start/scope are `/`. Ordinary 192/512 PNGs, an opaque maskable
@@ -223,14 +228,9 @@ storage to simulate success. Preserve normal waiting activation. The automated
 v1 → v2 → v1 test uses complete synthetic builds under the corrected implementation;
 it is not production or physical iPhone rollback evidence.
 
-Tasks **3.2–3.4 stay unchecked**: actual post-merge Pages publication/header/asset
-verification; PM iPhone/Chrome Share installation, standalone launch, online Auth,
-offline hard reload/cold reopen, both locales and safe-area/touch acceptance; then
-same-installed-app observable waiting update and separately authorized compatible rollback. Internal recovery cases use representative evidence. Record iPhone,
-iOS/Chrome versions, URL and revisions with sanitized pass/fail, never identity,
-tokens, codes, account screenshots or live-account traces. Desktop Chromium and
-synthetic WebKit-style absent-hint cases supplement but cannot replace these gates.
-Keep this change unarchived and later changes planning-only until acceptance.
+## Historical implementation runbook notes from merged PR #6–#8
+
+These notes describe the implementation handoffs; their physical-device restrictions and unchecked-task statements are historical. The fresh-install acceptance and closure record below govern completion. Technical safety rules remain unchanged.
 
 ## Task 3.4 evidence contract
 
@@ -272,3 +272,248 @@ A resource-fill failure followed by a successful identical-worker retry may leav
 Disposable regression fixtures cover these distinct gates and uncertain/delayed writes, lock retention, concurrency, authority/head/epoch loss, predecessor pins, repair history and cleanup seals. Positive English/Portuguese checks require working bound online and offline application documents after adoption and worker restart. Recovery executes no Auth SDK and requests no Auth/API/provider/cross-origin resources. Existing schema/protocol, dependencies, Auth policy, recovery wording/CSP and cleanup policy are unchanged.
 
 This narrow correction does not demonstrate the cause of the physical phone failure or recover every historical durable state. Task 3.4 stays unchecked. Do not interact with the preserved phone, change production/rollback/settings or treat automated success as device acceptance; a later recovery procedure requires independent review and authorization.
+
+Task **3.2 passed on the baseline** on 2026-10-20 at **https://spendspacey.pages.dev**, merge
+`fae9f51b489db95d672a4761cbd9ecef80b53de6`, Pages deployment `90a2be8a`.
+[Production verification](installable-offline-shell-verification.md#production-verification--task-32-accepted)
+records exact generated/live resource hashes, 44 HTTP cases and 19 hosted desktop
+Chromium scenario groups. It also discloses the failed merge CI cancellation case,
+the passing accepted identical-tree CI and passing diagnostic local unit rerun.
+These automated results are separate from the PM's Task **3.3** acceptance below
+and do not complete Task **3.4**.
+
+## Pending PM acceptance
+
+> **Historical acceptance handoff.** The following Task 3.3 and PR #5 progress statements retain their original dates/results. The completed fresh-install Task 3.4 and final 9/9 state are recorded below; these historical 8/9 statements are not current blockers.
+
+Task **3.3 is accepted** from PM-reported behavior on **2026-10-21 at approximately
+22:38 CEST (Europe/Berlin)**: **iPhone 16 Pro**, **iOS 26.6.2**,
+**Chrome 155.0.8059.37**, **English first** in preferred languages, canonical
+**https://spendspacey.pages.dev**, baseline production revision
+`fae9f51b489db95d672a4761cbd9ecef80b53de6`.
+The [PM behavioral record](installable-offline-shell-verification.md#pm-physical-iphone-acceptance--task-33-accepted)
+contains only the supplied installation, authentication, offline, localization and
+reconnect outcomes. Progress is **8/9**; only **Task 3.4 remains unchecked**.
+
+**Historical PR #5 handoff — superseded by the 2026-10-28 reset below.** The
+following handoff is preserved as history, not a current instruction.
+
+The corrected [PR #5](https://github.com/dnstld/spendspacey/pull/5) replacement is
+merged, published and independently verified in the corrected-production record.
+Keep `docs/accept-installable-offline-shell` uncommitted and unpushed, with no closure
+PR, until Task 3.4 is completed. Retain the same installed app, unopened until the
+PM has reviewed the sequence below and coordinated the supervised session.
+
+### Task 3.3 — accepted baseline installation, online and offline smoke
+
+The checklist below is the procedure; the separate PM record above states the
+actual supplied outcomes. No additional subcase is inferred as passed.
+
+1. Record model, actual iOS/Chrome versions, date/time, English-first language order,
+   canonical URL and deployed merge. In iPhone Chrome open
+   **https://spendspacey.pages.dev**; choose **Share → Add to Home Screen** and
+   confirm **Spendspacey** with the intended green s-dot icon.
+2. Launch from that Home Screen icon. Confirm standalone web-app presentation,
+   rather than an ordinary Chrome tab/bookmark. Prime this installed context online.
+3. From the installed app, use the PM's existing authorized Google account for
+   online sign-in, return to the installed app, verify identity/avatar privately,
+   and sign out. A successful separate Chrome tab is insufficient. Report pass/fail
+   only; no identity screenshot or Auth trace. Complete this on the phone; the
+   automated work did not attempt a real sign-in.
+4. Wait for complete offline preparation, then ordinarily reload/reopen to acquire
+   control/readiness. With airplane mode on **and Wi-Fi/mobile data disabled**,
+   reload and fully close/reopen the Home Screen app. Confirm the complete shell
+   loads in English; switch to Brazilian Portuguese and repeat reload/cold reopen.
+5. Check document/language preference, narrow-screen and safe-area layout, touch,
+   zoom, readable controls and avatar fallback. Check offline Auth connection
+   guidance and reconnect behavior: no automatic sign-in/out/exchange, no indefinite
+   shell-blocking spinner, and no fresh authentication claim while offline. Restore
+   connectivity and confirm normal deliberate online actions remain usable.
+
+### Task 3.4 — fresh-install bootstrap acceptance (2026-10-28)
+
+**Approved contract; PM fresh-install checklist completed on 2026-10-29 at 9/9.** This procedure is retained as the accepted checklist, not a request for further phone action. See the [exact final PM results](installable-offline-shell-verification.md#task-34-fresh-install-pm-acceptance--approved-reset-completed-2026-10-29). The old installation spans experimental releases with confirmed service-worker defects. The PM classifies it as a **legacy development installation with unrecoverable/indeterminate internal state** and abandons it as the release-acceptance baseline. All earlier failures, inconclusive results, temporary successes and diagnoses remain exactly recorded in the [verification record](installable-offline-shell-verification.md#pm-approved-bootstrap-acceptance-scope-reset-2026-10-28); this is not successful recovery or evidence that the defects were harmless.
+
+Fresh baseline: **https://spendspacey.pages.dev**, merge `2acaa960863024419cb1f22166cd1d9c66e8640b`, worker `124f91385e65e2db4091059a230ae9ccb2991cebff01d3047e29015269c1086b`. Exact release identity comes from external verification, not phone appearance or internals. These are the already verified release identities; this documentation revision does not run another production audit. If the intended baseline changes before execution, stop for reviewer resolution rather than silently substituting it.
+
+The following is the accepted checklist. The supplied results—not this procedure—record what the PM actually performed; no additional phone action is requested:
+
+1. **Review prerequisite.** Record independent approval of this revised contract before any legacy-removal or fresh-install action. Record actual device/iOS/Chrome versions, date/time/timezone, canonical URL and externally supplied baseline identity using sanitized text only.
+2. **Remove the legacy development installation only after that review.** Record that removal clears that installation's local app state and authentication session; reauthentication may be required. The PM states Spendspacey currently contains no user-entered transactions or other offline business data. Record removal as removal, never recovery/migration/repair. Do not inspect storage or account/session details to demonstrate it.
+3. **Install fresh online.** Open the canonical production URL in Chrome on the existing iPhone, choose Share → Add to Home Screen, confirm Spendspacey and the intended icon, then launch from that new Home Screen installation. Confirm standalone presentation and the normal usable online shell. Stop if recovery appears, the shell is unusable or the icon only opens an ordinary browser tab.
+4. **Confirm the existing Auth shell only if needed.** Online sign-in/sign-out may be used to confirm it; reauthentication may be necessary after removal. Record boolean outcomes only, with no account details, identity screenshots, callback inputs or Auth/session traces. This adds no new authentication or account-data acceptance scope.
+5. **English and Portuguese online.** Select English and Brazilian Portuguese in turn. For each, confirm usable controls and persisted language through a safe normal online reload and full app close/reopen. Prime the installed context itself online and wait for complete offline readiness; preparing a separate Chrome tab is insufficient.
+6. **English and Portuguese offline.** For each language, prepare that selection online, disable connectivity, then test safe normal offline reload and full app close/reopen from the fresh Home Screen icon. Confirm the complete shell, controls, connection guidance and language persistence. Do not attempt offline sign-in/out. If a safe normal reload control is unavailable, record unavailable/not tested, never passed, and use the approved combined evidence route: physical bilingual cold-reopen passes plus separately mapped automated/real-worker reload evidence. Do not invent a physical reload pass or use developer tooling/cache mutation.
+7. **Reconnect.** Restore connectivity and confirm a normal usable shell and retained language/installation without loops, recovery, unexpected automatic retry or forced navigation/reload. Do not infer exact worker/controller identity, generation ownership, session validity or internal durability from a visible shell.
+8. **Record and review.** Record exact per-language online reload/close-reopen, offline reload/full close-reopen and reconnect outcomes, with all unexecuted cases labeled pending/not tested. Any recovery page, loop, unusable shell, installation loss, forced navigation or visible error is a failure requiring investigation; stop rather than repeating trials or clearing/reinstalling again. Only after independent contract approval, recorded removal, fresh installation and all required physical passes may the PM approve Task 3.4 completion. The PM has supplied those approved results on 2026-10-29; Task 3.4 is complete at **9/9**, with physical reload still unavailable/not tested.
+
+No physical recovery, migration, repair, deliberate corruption/fault injection or rollback of pre-baseline experimental installations is required. No phone developer tooling, cache mutation, controller/worker inspection, production rollback or private-data inspection/export is required or authorized. Applicable deterministic, real-worker, Chromium, supplemental WebKit, hosted and production evidence may satisfy update, interrupted activation, repair, rollback, ownership, retention, integrity and privacy requirements. Retain the existing [technical evidence mapping](installable-offline-shell-verification.md#task-34-evidence-contract-revision-2026-10-22) with its coverage limits; record these as **not manually executed on the physical iPhone; covered by representative automated/hosted evidence**, not phone passes. The prior mapping's physical same-installation/rollback completion gates are superseded by this reset.
+
+A normal PM smoke check belongs to the next ordinary production update when one naturally occurs. It does not block this bootstrap phase or authorize an artificial update/production rollback now. After acceptance, later phases inherit the fresh installation context. The completed evidence authorizes sync/archive and an unmerged closure review PR; it authorizes no production/Cloudflare change, additional phone action or next product phase.
+
+### Task 3.4 — same-installed-app lifecycle acceptance
+
+> **Historical procedure — superseded 2026-10-28. Do not execute.** Retained verbatim below as the earlier contract; it does not authorize recovery, phone actions or rollback. The current gate is the fresh-install checklist above.
+
+**Revised evidence contract, pending reviewer approval and PM execution.** The PM
+confirms the existing Home Screen installation has remained unopened since corrected
+production `611994f` was deployed. Only the PM performs and approves behavior on
+the personal iPhone. No developer tooling, service-worker/controller or generation
+inspection, request blocking, fault injection or cache mutation on that phone is
+required or authorized. Do not inspect/export cookies, tokens, sessions, account
+storage, callback inputs, API responses or other private data. Do not reinstall,
+clear site data or repeat Task 3.3 authentication to satisfy this gate.
+
+The product's complete-generation, recovery, ownership, repair-ordering and privacy
+guarantees remain mandatory. Their evidence comes from the existing representative
+automated/hosted checks, as mapped in the
+[verification record](installable-offline-shell-verification.md#task-34-evidence-contract-revision-2026-10-22).
+For each technical subcase record **“not manually executed on the physical iPhone;
+covered by representative automated/hosted evidence”**. Those are not phone passes
+or missing phone-tooling blockers. Actual phone behavior remains a separate PM gate.
+
+| Target                | Baseline B                                                         | Corrected C                                                        |
+| --------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Merge                 | `fae9f51b489db95d672a4761cbd9ecef80b53de6`                         | `611994f4e0cae15b4b4ef4ada6659d10ac059a55`                         |
+| Accepted PR #5 head   | —                                                                  | `79dbbd485a922b560fc92f0cc1ef4c1b362c9286`                         |
+| Production deployment | `90a2be8a-7daf-42b0-a5d1-344ed81cfae3`                             | `a52aaac4-aa23-4417-8084-0183cf249c11`                             |
+| Immutable host        | `90a2be8a.spendspacey.pages.dev`                                   | `a52aaac4.spendspacey.pages.dev`                                   |
+| Worker identity       | `b412fb85d9b7df20db717f84dc30d6021880dcd07f61fa1f8216c2ed026117ca` | `a2c2c03c7f95d45e9f9b5a33cf89ea9ab9a2f05de84bcd0c81dbe850a046af30` |
+| `/sw.js` bytes        | 59,956                                                             | 60,410                                                             |
+| `/sw.js` SHA-256      | `5f8032f516a897446a6e6a9278fbc1b0a99f78401a4d3fc2249116049543f044` | `5f5981de031458f56348048a1a375f797461538eccc70a9088ea5e4928494d3a` |
+
+Canonical phone origin is **https://spendspacey.pages.dev**. The immutable hosts,
+worker identities and hashes above are for verification **outside the phone**.
+Both releases share v3 compatibility digest
+`c2ca46b7b90c80cc4c03b5de5db5aad5a832f5f2f0a74675ea791dee36885fb9`.
+All 11 application resources are byte-identical, so product appearance cannot
+identify the controlling worker. Record PM-observed close/reopen behavior separately
+from exact release/controller identity established by production and representative
+browser evidence; do not claim phone-internal revision proof. B retains the known
+repair-order defect and is only the temporary compatible rollback target. C is the
+required final production release; do not redeploy obsolete v2 workers.
+
+Before PM execution, obtain reviewer approval of this revised evidence contract,
+reverify canonical C externally, and supply the PM with the verified deployment
+revision. Record actual current device/iOS/Chrome versions, date/time/timezone and
+preferred language from PM-supplied text, without inspecting the phone. No production
+switch is authorized by this procedure or by approval of the contract alone.
+
+1. **First single PM action after reviewer approval:** while online, tap the existing
+   Spendspacey Home Screen icon once and leave the app open. Do not reload yet.
+2. **Observe waiting and usability.** If a waiting-update notice appears, report its
+   language and wording without account content. Keep that document open and check
+   that ordinary controls and language selection remain usable, with no forced
+   reload. If no notice appears, record **not observed**, not a phone pass or failure
+   of the underlying waiting requirement; normal activation may already have occurred.
+   A not-observed notice does not alone block Task 3.4 after rendered-notice,
+   waiting-worker and retention evidence passes. A broken notice, forced navigation/
+   reload, unusable UI or lost installation is a failure requiring investigation.
+3. **Close-all/reopen in the same installation.** Close all Spendspacey Home Screen
+   windows and Spendspacey browser tabs, then reopen the same icon online. Confirm
+   standalone launch, responsive shell/language controls, readiness guidance and no
+   unexpected retry/reload or loss of the installation. This is behavioral adoption
+   evidence, not an independent measurement of the phone's exact controller revision.
+4. **Complete offline reload and cold reopen.** Wait for offline readiness; enable
+   airplane mode and explicitly disable Wi-Fi/mobile data. Test a safe normal reload
+   control if available. If the installed app has no safe normal reload control,
+   record physical reload as **unavailable/not tested**, never passed. In either
+   case, perform offline **close-all and cold reopen** using the same Home Screen
+   icon in English and Brazilian Portuguese; confirm the complete shell, readable
+   controls/offline guidance and persisted language in both. For an unavailable
+   reload control, these PM cold-reopen results **plus the mapped automated/browser
+   reload evidence** form the accepted combined route for separate reload behavior.
+   This route applies to the corrected update, rollback and restoration checks.
+   Do not invent a physical reload pass or use developer tooling to obtain one.
+5. **Reconnect behavior.** Restore connectivity and confirm normal online shell
+   operation, retained language/installation, and no visible automatic repair retry,
+   forced reload or loop. Online operation here means the existing shell and normal
+   controls; accepted Task 3.3 Auth outcomes remain unchanged. Do not sign in or inspect
+   account data for this gate. Report any spontaneous recovery/error, without inducing it.
+6. **Compatible rollback, only after separate production authorization.** Keep the
+   installed app open. The authorized Cloudflare operator first verifies C and both
+   immutable production deployments outside the phone: full deployment ID/commit,
+   worker/hash, all 11 resources, compatibility, manifest and security/cache/callback
+   policy. In **Workers & Pages → spendspacey → Deployments → All deployments**,
+   identify successful **Production/main** deployment
+   **`90a2be8a-7daf-42b0-a5d1-344ed81cfae3`**, commit **`fae9f51…`**. Use that row's
+   **⋯ → Rollback to this deployment** only after separate approval and confirmation
+   of the exact target. Reverify canonical B externally before the PM continues.
+   The PM then repeats observable waiting/usability, close-all/reopen, online operation
+   and both-language offline reload/cold reopen checks using the same installation.
+   Record a missing notice as not observed. Do not induce faults or run repair tests.
+7. **Restore corrected production, separately authorized with the rollback plan.**
+   The operator selects successful **Production/main** deployment
+   **`a52aaac4-aa23-4417-8084-0183cf249c11`**, commit **`611994f…`**, using the same
+   **⋯ → Rollback to this deployment** action after checking its confirmation target.
+   Verify canonical C worker/hash, all 11 resources, manifest, exact CSP, cache/security/
+   callback headers and canonical/alternate-origin Auth policy outside the phone,
+   without signing in. The PM repeats steps 2–5, including close-all/reopen and offline
+   checks in both languages. Leave production on C and the same installed app usable
+   after the normal reopen path, with connectivity and preferred language restored.
+8. **Return behavioral outcomes.** Only the PM approves the phone results. Record
+   pass/fail/not-tested for steps 2–7, with waiting marked not observed when applicable.
+   Use step 4's combined route when physical reload is unavailable, retaining its
+   unavailable/not-tested label. Keep technical checks under their automated/hosted
+   classification. Task 3.4 remains
+   unchecked until review and all required behavioral checks, including separately
+   authorized rollback/restoration, have accepted evidence.
+
+The [official Pages rollback documentation](https://developers.cloudflare.com/pages/configuration/rollbacks/)
+describes selection of a prior or newer successful production deployment. Only the
+selected production deployment may change during separately authorized steps 6–7.
+Do not change configuration, environment variables, Auth allowlists/callbacks, domains,
+project/build settings, integrations, DNS or external services. Preview deployment
+`0b2ca09b-4a6a-4599-b609-8cb19f7f1e5a` is not a rollback target. Stop before any
+switch if the exact full deployment/commit/environment is uncertain, the action is
+unavailable, another release appears or external verification fails. Do not select
+an approximate target or improvise settings. If restoration to C cannot be selected
+with certainty, pause and report the actual production state without guessing.
+
+### Evidence the PM must return
+
+- Date/time/timezone, actual current iPhone/iOS/Chrome versions, preferred languages,
+  canonical URL and confirmation that the same Home Screen installation was retained.
+- For Task 3.4, only observable waiting/usability, close-all/reopen, online operation,
+  English/Portuguese offline reload/cold reopen, reconnect, rollback/restoration and
+  absence of unexpected retry/forced reload/installation loss. Record waiting as
+  not observed when unavailable. Record physical reload as unavailable/not tested
+  when no safe control exists, paired with PM offline close-all/cold reopen in both
+  languages and the mapped automated/browser reload evidence. Other unexecuted
+  checks remain not tested; an available safe reload control is tested normally.
+- Deployment revisions/IDs supplied from external verification, labeled as such;
+  no claim that unchanged product content identifies the phone's controller.
+- Sanitized text or optional cropped non-account UI screenshots only. No identities,
+  keys, provider/callback inputs, tokens, sessions, cookies, account storage, API
+  responses, private dashboards or network/storage exports. Task 3.2/3.3 evidence
+  remains accepted and is not reclassified or expanded by this procedure.
+
+Task **3.3 is complete** with the PM evidence recorded above. Keep **Task 3.4
+unchecked** until its actual installed-app evidence is documented. Corrected PR #5
+production is verified; the device lifecycle gate remains pending. Keep this branch
+uncommitted and the change unarchived; later changes remain planning-only. Do not
+commit, push, open the closure PR or archive until Task 3.4 is complete.
+
+## Forward requirement — later offline financial data
+
+User-entered transactions and synchronization state must not be stored in or depend on service-worker Cache Storage. Later transaction/offline-data work must use durable application storage such as IndexedDB, versioned schema migrations, per-user isolation and an outbox/synchronization design. Its tests must prove worker update/replacement does not delete or alter financial data or synchronization state. Once user-entered offline data exists, clearing data or reinstalling must never be presented as an acceptable recovery mechanism. This is a forward requirement, not transactions, new storage or synchronization in this shell phase. The legacy-removal exception above relies on the current absence of user-entered offline business data.
+
+The current result is the completed approved fresh-install contract, not the historical procedure above. **Task 3.4 is complete at 9/9. No additional phone action is authorized.**
+
+## Final bootstrap acceptance (2026-10-29)
+
+The PM's [fresh-install results](installable-offline-shell-verification.md#task-34-fresh-install-pm-acceptance--approved-reset-completed-2026-10-29)
+complete Task 3.4 and this change at **9/9** on production merge
+`2acaa960863024419cb1f22166cd1d9c66e8640b`, worker
+`124f91385e65e2db4091059a230ae9ccb2991cebff01d3047e29015269c1086b`.
+English/Portuguese physical online/offline cold reopen and reconnect passed; safe
+physical reload is unavailable/not tested and uses the approved separate automated/
+real-worker evidence. Readiness text is static guidance, not a live connectivity
+indicator. The final PM state is online, Portuguese retained and app left open.
+Legacy deletion relinquished local installation state/session; it was not provider
+logout or recovery, and no browser website data was cleared. No migratability claim
+is made for historical experimental states. All earlier failed/inconclusive records
+remain historical. Technical lifecycle guarantees and the forward financial-data
+requirement remain explicit. The next ordinary-update PM smoke is non-blocking.
+Archive/sync and open the closure PR for independent review; do not merge it,
+change production/Cloudflare/phone state or begin the next product phase.

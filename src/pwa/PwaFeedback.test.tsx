@@ -1,9 +1,10 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthContext, type AuthContextValue } from '@/auth/context';
+import { LanguageSelect } from '@/components/LanguageSelect';
 import { initializeI18n } from '@/i18n';
 import { authMock } from '../../test/authMock';
 import { PwaFeedback } from './PwaFeedback';
@@ -40,6 +41,7 @@ async function mount(locale: 'en' | 'pt-BR' = 'en', overrides: Partial<AuthConte
   const view = render(
     <I18nextProvider i18n={i18n}>
       <AuthContext value={value}>
+        <LanguageSelect />
         <PwaFeedback />
       </AuthContext>
     </I18nextProvider>,
@@ -71,6 +73,39 @@ describe('localized static preparation and recovery feedback', () => {
       mock.state.recovery = true;
     }
   });
+
+  it.each([
+    ['en', 'An update is ready. Close all Spendspacey windows, then reopen the app to use it.'],
+    [
+      'pt-BR',
+      'Uma atualização está pronta. Feche todas as janelas do Spendspacey e abra o aplicativo novamente para usá-la.',
+    ],
+  ] as const)(
+    'renders exact accessible waiting guidance after selecting %s',
+    async (locale, text) => {
+      mock.state.waiting = true;
+      try {
+        await mount();
+        const region = screen.getByRole('complementary');
+        const english =
+          'An update is ready. Close all Spendspacey windows, then reopen the app to use it.';
+        expect(within(region).getByText(english, { exact: true })).toBeVisible();
+        expect(region).toHaveAttribute('aria-live', 'polite');
+
+        await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Language' }), locale);
+
+        expect(within(region).getByText(text, { exact: true })).toBeVisible();
+        expect(screen.getByRole('complementary')).toBe(region);
+        expect(region).toHaveAttribute('aria-live', 'polite');
+        if (locale === 'pt-BR')
+          expect(within(region).queryByText(english, { exact: true })).not.toBeInTheDocument();
+        expect(mock.repair).not.toHaveBeenCalled();
+      } finally {
+        mock.state.waiting = false;
+      }
+    },
+  );
+
   it.each(['en', 'pt-BR'] as const)(
     'distinguishes preparation from control and shows reload/reopen guidance in %s',
     async (locale) => {

@@ -91,7 +91,7 @@ After the accepted merge is deployed and exact production settings are configure
 
 During apply: implement/test static headers, raw URL validation, and canonical-origin policy, write the runbook, pass CI/review, and merge the accepted change into `main`. Then link/configure Pages Free, verify exact toolchain/build/output/metadata and assigned origin, have the PM configure the production Auth table with signups still disabled, inspect actual delivery/headers, and complete the PM phone smoke. Correct stale pending Phase 1 runbook wording without altering archived evidence.
 
-Rollback restores a previously accepted complete `main` production deployment at the same Pages origin; no worker or data migration exists here. On the first release with no prior accepted deployment, stop/disable the failed publication rather than promote a preview build. Leave publication/provider/phone tasks unchecked until actual evidence exists. After acceptance and spec synchronization, proceed to [installable-offline-shell](../../installable-offline-shell/proposal.md).
+Rollback restores a previously accepted complete `main` production deployment at the same Pages origin; no worker or data migration exists here. On the first release with no prior accepted deployment, stop/disable the failed publication rather than promote a preview build. Leave publication/provider/phone tasks unchecked until actual evidence exists. After acceptance and spec synchronization, proceed to [installable-offline-shell](../2026-10-29-installable-offline-shell/proposal.md).
 
 ## Execution prerequisites and evidence
 
