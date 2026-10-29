@@ -6,7 +6,7 @@ Once Spendspacey is deployed and installed, one read-only view of the signed-in 
 
 ## What Changes
 
-- Sequence **3 of 4**; requires [installable-offline-shell](../installable-offline-shell/proposal.md) implemented, deployed, manually accepted on the iPhone Home Screen app installed through Chrome, with tested iOS/Chrome versions recorded, and predecessor specs synchronized before apply.
+- Sequence **3 of 4**; requires [installable-offline-shell](../archive/2026-10-29-installable-offline-shell/proposal.md) implemented, deployed, manually accepted on the iPhone Home Screen app installed through Chrome, with tested iOS/Chrome versions recorded, and predecessor specs synchronized before apply.
 - Add one existing-client SELECT of `id,display_name,avatar_url,updated_at` from `public.profiles` (the Supabase `/profiles` resource, served at `/rest/v1/profiles`), explicitly filtered to the verified signed-in user's ID and protected by existing RLS. Return at most that user's row, never a directory of other users.
 - Validate selected fields and the returned owner ID; provide localized loading, missing-profile, error/retry, and accessible name/avatar fallbacks in the signed-in root.
 - Keep the result only in page memory. Clear it on account changes or sign-out and ignore late results from earlier accounts.

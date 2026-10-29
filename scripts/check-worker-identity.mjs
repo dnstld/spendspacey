@@ -60,6 +60,30 @@ try {
     .waitFor({ timeout: 20000 });
   const result = await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
+    // ready may resolve while activation is still running. Preserve the activate
+    // event's timing observation, then bound the separate post-activation probe.
+    const active = registration.active;
+    if (active.state !== 'activated') {
+      await new Promise((resolve, reject) => {
+        const finish = (error) => {
+          clearTimeout(deadline);
+          active.removeEventListener('statechange', changed);
+          if (error) reject(error);
+          else resolve();
+        };
+        const changed = () => {
+          if (registration.active !== active || active.state === 'redundant')
+            finish(Error('Disposable identity probe lost its active worker'));
+          else if (active.state === 'activated') finish();
+        };
+        const deadline = setTimeout(
+          () => finish(Error('Disposable identity probe activation deadline')),
+          10000,
+        );
+        active.addEventListener('statechange', changed);
+        changed();
+      });
+    }
     return new Promise((resolve) => {
       const channel = new MessageChannel();
       channel.port1.onmessage = (e) => resolve(e.data);

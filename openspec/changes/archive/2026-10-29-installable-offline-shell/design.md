@@ -84,7 +84,19 @@ Use the actual generation engine with Cache Storage/Web Lock adapters for interr
 
 The required manual target is **iPhone with Google Chrome**. The PM records the iPhone model, tested iOS and Chrome versions, production Pages URL, and deployed/update revisions. Open that production URL in Chrome, use its Share menu → Add to Home Screen, confirm the Spendspacey name and intended icon, then launch from the Home Screen. Confirm standalone web-app presentation; an icon that opens an ordinary browser tab/bookmark does not pass. [Chrome's iPhone installation guidance](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DiOS&hl=en)
 
-Perform phase-specific online authentication/identity/sign-out, static readiness, airplane-mode safe reload when available (otherwise record unavailable/not tested with separate automated reload evidence) and full close-reopen, both languages, safe-area/touch controls, reconnect, and waiting-update close-reopen checks from the installed Home Screen app. Prime that installed context itself; a Chrome tab visit may not transfer its storage. Record sanitized PM pass/fail evidence for actual standalone launch and these checks. Desktop Chromium automation supplements this manual evidence and cannot replace it. Safari-specific manual acceptance is not required, and the target does not authorize browser detection. No profiles are required in this increment; changes 3/4 inherit this same installed-app acceptance context.
+### PM acceptance-scope reset — 2026-10-28
+
+The PM approved a bootstrap acceptance reset because the existing installation spans experimental releases with confirmed service-worker defects. Classify it as a **legacy development installation with unrecoverable/indeterminate internal state**, outside the release-acceptance baseline. This is an acceptance-scope decision, not proof of a specific hidden state, successful recovery, or a claim that the defects were harmless. Preserve every historical phone observation/diagnosis and Task 3.2/3.3 result exactly in the [verification record](../../../../docs/installable-offline-shell-verification.md#pm-approved-bootstrap-acceptance-scope-reset-2026-10-28).
+
+Task 3.4 instead uses a **fresh installation** from canonical `https://spendspacey.pages.dev` through Chrome on the existing iPhone, baseline merge `2acaa960863024419cb1f22166cd1d9c66e8640b`, worker `124f91385e65e2db4091059a230ae9ccb2991cebff01d3047e29015269c1086b`. Verify release identity outside the phone; do not infer it from appearance or inspect phone internals. This planning revision does not reverify production or authorize a phone action.
+
+Independent approval of this revised contract is required before the PM may remove the legacy installation. Removal clears that installation's local app state and authentication session; reauthentication may be required. The PM states that Spendspacey currently contains no user-entered transactions or other offline business data. Record removal and its data/session consequences honestly, never as evidence of legacy recovery. No migration, physical repair, corruption/fault injection or rollback of pre-baseline experimental installations is required for Task 3.4.
+
+Only the PM performs and approves the fresh physical checklist: correct name/icon and standalone launch; normal online shell; sign-in/sign-out only if needed to confirm the existing Auth shell; English/Brazilian Portuguese selection and persistence; online reload and close/reopen; offline reload and full close/reopen in both languages after complete online preparation; and reconnect without loops, recovery, installation loss or forced navigation. Prime the fresh installed context itself. Use only safe normal reload controls; if unavailable, record unavailable/not tested, never passed, and use the approved combined route: physical bilingual cold-reopen passes plus separate automated/real-worker reload evidence. Do not use developer tooling to manufacture a reload result. Safari-specific manual acceptance is not required, and no profiles are required.
+
+Existing applicable deterministic, real-worker, Chromium, supplemental WebKit, hosted and production evidence may satisfy update, interrupted activation, repair, rollback, ownership, retention, integrity and privacy requirements. Keep their coverage/limitations explicit and record technical subcases as **not manually executed on the physical iPhone; covered by representative automated/hosted evidence**, never as phone passes. Technical product guarantees remain mandatory. No phone developer tooling, cache mutation, worker/controller identity inspection, deliberate corruption, repair fault injection, production rollback or abandoned-installation migration is required. No Auth/session/private-data inspection or export is allowed.
+
+A future ordinary production update receives a normal PM smoke check when it naturally occurs; waiting/update behavior remains covered by representative evidence for this bootstrap phase. That future smoke does not block bootstrap completion or require an artificial release/rollback now. Task 3.4 may complete only after independent contract approval, recorded legacy removal, fresh baseline installation, all required physical checks passing and exact sanitized results recorded. The PM supplied the completed fresh-install results on 2026-10-29, including the approved unavailable-reload route; final progress is **9/9**, with no physical reload pass inferred. Changes 3/4 inherit the newly accepted installation context, not the abandoned experimental one.
 
 ## Risks / Trade-offs
 
@@ -96,9 +108,9 @@ Perform phase-specific online authentication/identity/sign-out, static readiness
 
 ## Migration Plan
 
-Verify predecessor acceptance/spec synchronization, implement/test/review the PWA slice, merge accepted changes into `main`, and let the existing Pages GitHub integration deploy at the same assigned production URL. Verify actual Pages worker headers/native fallback and complete phone installation/update acceptance. Optional previews retain disabled Google sign-in/callback exchange; production signups remain disabled. This plan itself changes no app code or host.
+Verify predecessor acceptance/spec synchronization, implement/test/review the PWA slice, merge accepted changes into `main`, and let the existing Pages GitHub integration deploy at the same assigned production URL. Verify actual Pages worker headers/native fallback and complete the revised fresh-install phone acceptance, with representative technical lifecycle evidence. A naturally occurring future-update PM smoke is not a bootstrap gate. Optional previews retain disabled Google sign-in/callback exchange; production signups remain disabled. This plan itself changes no app code or host.
 
-Rollback must serve a compatible recovery worker at the same URL and restore a complete build; reverting files alone does not unregister installed workers. Do not delete SDK/locale storage during static repair. Only after this milestone passes should [online-profiles](../online-profiles/proposal.md) begin.
+Rollback must serve a compatible recovery worker at the same URL and restore a complete build; reverting files alone does not unregister installed workers. Do not delete SDK/locale storage during static repair. Only after this milestone passes should [online-profiles](../../online-profiles/proposal.md) begin.
 
 ## Execution prerequisites and evidence
 
@@ -115,6 +127,8 @@ An already committed owner restores its durable epoch without another activation
 Recovery reacquires the current controller and freshly handshakes before deliberate status/repair/cancel; controller changes invalidate correlations and obsolete replies. No mutation is replayed and unbound documents remain unbound. Neutral bilingual copy distinguishes unavailable verification/activation from resource-verification failure without asserting unproven resource loss. Keep exact script/style CSP hashes and no external code, Auth or private storage access.
 
 The activation interruption is a confirmed representative defect and leading hypothesis for the phone failure, not proof of its exact trigger. Preserve the open phone document; implementation and preview verification authorize no phone or production action.
+
+**Historical implementation evidence contract, superseded by the 2026-10-28 reset above:**
 
 Physical Task 3.4 covers only PM-observed behavior in the same Home Screen installation: waiting notice if observable, usable existing document, close-all/reopen adoption, online use, complete offline close-all/cold reopen in English and Brazilian Portuguese, and absence of unexpected retry, forced reload or installation loss. Test an available safe normal reload control normally. If none exists, record physical reload as `unavailable/not tested`, never passed; combine bilingual physical offline cold-reopen evidence with the separate mapped automated/browser reload evidence. A waiting notice `not observed` does not alone block acceptance after rendered bilingual notice, waiting-worker and retention evidence pass. A broken notice, forced navigation/reload, unusable UI or lost installation is a failure requiring investigation.
 
@@ -141,3 +155,19 @@ A persisted-but-unacknowledged completion is a durable fact after authoritative 
 Keep incomplete reservations and their protected resources quarantined and defer cleanup. Committed-owner restoration remains independent and unchanged; it neither transfers ownership nor consumes/associates reservations. Preserve native active-instance proof, lock and immediate head/parent/epoch fences, activation read-back, candidate/predecessor verification and retention, exact browser-issued binding before application bytes, repair/spent history, deletion seals, rollback/cutover history and all Auth/cache privacy boundaries. No schema, protocol, migration, dependency, Auth, recovery copy/CSP or cleanup-policy change is required.
 
 Regression evidence separates candidate count from supersession and durable completion from acknowledgement, then checks authority loss, concurrent/uncertain commits, restart and bilingual online/offline bound application availability. Archived `967a2b6` provides the negative real-worker control for failed-install → identical-worker retry → cold launch. This representative defect does not establish the phone’s hidden cause or solve every historical durable state. No production or phone action is authorized.
+
+## Forward requirement — later transaction/offline-data work
+
+User-entered transactions and synchronization state must not be stored in or depend on service-worker Cache Storage. The later transaction/offline-data phase must use durable application storage such as IndexedDB, versioned schema migrations, per-user isolation and an outbox/synchronization design. Its tests must prove that service-worker update/replacement does not delete or alter financial data or synchronization state. Once user-entered offline data exists, clearing or reinstalling must never be presented as an acceptable recovery mechanism. This is a handoff requirement for that later work, not transactions, new storage, synchronization or implementation tasks in the current shell phase. The legacy-removal exception above relies on the present absence of such data.
+
+## Accepted bootstrap closure (2026-10-29)
+
+The PM supplies the approved reset and fresh-install passes in the verification record:
+legacy deletion/local-state-session relinquishment (not provider logout or recovery),
+canonical installation/name/icon/standalone launch, boolean-only reauthentication,
+bilingual online/offline cold reopen and reconnect. No safe normal reload control exists;
+physical reload remains unavailable/not tested and the approved combined evidence route
+supplies separate reload coverage. All nine tasks are complete. Historical failed and
+inconclusive attempts remain unchanged; no experimental-installation migration is claimed.
+Archive and synchronize this completed change without changing runtime production code,
+production/Cloudflare settings or the phone, and without starting the next product phase.

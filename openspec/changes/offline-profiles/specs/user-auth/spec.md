@@ -12,6 +12,16 @@ The localized static shell and language selector SHALL remain usable when sessio
 - **AND** an eligible snapshot can show the saved current-user card while absence of one shows no fabricated profile
 - **AND** no fresh authentication or current server verification is claimed and later SDK results still obey existing ordering and cleanup rules
 
+#### Scenario: Independent recovery has no authentication authority
+- **WHEN** the worker serves embedded canonical recovery
+- **THEN** it does not import/execute Auth, inspect SDK storage or make Auth/API requests
+- **AND** callback clones require their own committed generation binding, retain no-store/no-referrer and fail closed without a verified document; no callback cleanup is claimed without application execution
+
+#### Scenario: Existing callback route forms execute cleanup with document ownership
+- **WHEN** a controlled navigation matches the application's existing case-insensitive, trailing-slash or encoded-segment callback route
+- **THEN** a verified selected canonical document clone receives its own committed binding before delivery, retaining no-store/no-referrer and application-owned URL cleanup
+- **AND** no callback URL, query, fragment or sensitive input enters metadata, cache keys, logs or generated artifacts; unrecognized paths receive no worker fallback
+
 ### Requirement: Minimal authentication views
 
 The application SHALL show Spendspacey identity, language selection, and Google sign-in when signed out. The signed-in `/` screen SHALL show only the current user's profile, available SDK session email, language selection, sign-out, and necessary auth/PWA feedback. An eligible saved profile SHALL support explicitly unverified offline viewing without a current session. No other-user directory, expense content, dashboard, profile editor, or extra login method SHALL be introduced.
