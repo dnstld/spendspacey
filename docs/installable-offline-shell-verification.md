@@ -1962,9 +1962,9 @@ experimental installation was not recovered and is not migration evidence.
 
 | Field                                     | Recorded value                                                                                                                        |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Date / timezone                           | 2026-10-29 / Europe/Berlin; exact event time not supplied                                                                             |
+| Date / approximate local time / timezone  | 2026-10-29; approximately 11:30–12:30 local; Europe/Berlin (PM-reconfirmed metadata; no retest)                                       |
 | Device                                    | iPhone 16 Pro                                                                                                                         |
-| Previously supplied OS / browser versions | iOS 26.6.2 / Chrome 155.0.8059.37; not represented as newly reconfirmed versions                                                      |
+| PM-reconfirmed tested OS/browser versions | iOS 26.6.2 / Chrome 155.0.8059.37 (PM-reconfirmed tested versions)                                                                    |
 | Canonical installation URL                | https://spendspacey.pages.dev                                                                                                         |
 | Production merge                          | `2acaa960863024419cb1f22166cd1d9c66e8640b`                                                                                            |
 | Production worker                         | `124f91385e65e2db4091059a230ae9ccb2991cebff01d3047e29015269c1086b`                                                                    |
