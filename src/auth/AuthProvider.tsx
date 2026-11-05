@@ -5,6 +5,14 @@ import { authMessage, requireAuthStorage, type AuthMessage } from './errors';
 import { authenticationAllowed } from '@/lib/deployment';
 import { callbackRoute } from '@/lib/callbackRoute';
 
+const clientGenerations = new WeakMap<SupabaseClient, number>();
+
+function nextGeneration(client: SupabaseClient) {
+  const generation = (clientGenerations.get(client) ?? 0) + 1;
+  clientGenerations.set(client, generation);
+  return generation;
+}
+
 export function AuthProvider({
   client,
   children,
@@ -15,6 +23,7 @@ export function AuthProvider({
   const [state, setState] = useState<AuthState>(() => ({
     status: authenticationAllowed() ? 'initializing' : 'ready',
     session: null,
+    generation: 0,
   }));
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState<AuthMessage | null>(null);
@@ -31,7 +40,14 @@ export function AuthProvider({
       if (!active || event === 'INITIAL_SESSION') return;
       // The explicit read owns INITIAL_SESSION; only newer changes supersede it.
       revision++;
-      setState({ status: 'ready', session });
+      setState((previous) => ({
+        status: 'ready',
+        session,
+        generation:
+          previous.session?.user.id === session?.user.id
+            ? previous.generation
+            : nextGeneration(client),
+      }));
       setMessage(null);
     });
     const readRevision = revision;
@@ -56,7 +72,14 @@ export function AuthProvider({
           setState((previous) => ({ ...previous, status: 'error' }));
           setMessage(navigator.onLine === false ? 'offlineRestore' : authMessage(error, 'restore'));
         } else {
-          setState({ status: 'ready', session: data.session });
+          setState((previous) => ({
+            status: 'ready',
+            session: data.session,
+            generation:
+              previous.session?.user.id === data.session?.user.id
+                ? previous.generation
+                : nextGeneration(client),
+          }));
           setMessage(null);
         }
       })
@@ -125,6 +148,7 @@ export function AuthProvider({
     }
     operation.current = true;
     setPending('signOut');
+    setState((previous) => ({ ...previous, generation: nextGeneration(client) }));
     setMessage(null);
     try {
       const { error } = await client.auth.signOut({ scope: 'local' });

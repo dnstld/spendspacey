@@ -1,9 +1,11 @@
 import { vi } from 'vitest';
 import type { AuthChangeEvent, Session, SupabaseClient } from '@supabase/supabase-js';
+import { syntheticSession } from './session';
 
 export function authMock() {
   const listeners = new Set<(event: AuthChangeEvent, session: Session | null) => void>();
   const subscriptions = new Set<ReturnType<typeof vi.fn>>();
+  const user = syntheticSession().user;
   const auth = {
     getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
     onAuthStateChange: vi.fn(
@@ -20,10 +22,29 @@ export function authMock() {
     }),
     signOut: vi.fn().mockResolvedValue({ error: null }),
     exchangeCodeForSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+    getUser: vi.fn().mockResolvedValue({ data: { user }, error: null }),
   };
+  const maybeSingle = vi.fn().mockResolvedValue({
+    data: {
+      id: user.id,
+      display_name: 'Test Person',
+      avatar_url: 'https://images.example.test/profile.png',
+      updated_at: '2026-10-30T12:00:00Z',
+    },
+    error: null,
+  });
+  const retry = vi.fn(() => ({ maybeSingle }));
+  const abortSignal = vi.fn((signal: AbortSignal) => {
+    void signal;
+    return { retry };
+  });
+  const eq = vi.fn(() => ({ abortSignal, retry }));
+  const select = vi.fn(() => ({ eq }));
+  const from = vi.fn(() => ({ select }));
   return {
-    client: { auth } as unknown as SupabaseClient,
+    client: { auth, from } as unknown as SupabaseClient,
     auth,
+    profile: { from, select, eq, abortSignal, retry, maybeSingle },
     subscriptions,
     listeners,
     emit: (event: AuthChangeEvent, session: Session | null) => {

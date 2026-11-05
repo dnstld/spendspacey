@@ -5,20 +5,19 @@ import { useAuth } from './context';
 import { Feedback } from './Feedback';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { authenticationAllowed } from '@/lib/deployment';
-
-function safeImage(value: unknown): string | undefined {
-  if (typeof value !== 'string') return;
-  try {
-    const url = new URL(value);
-    if (url.protocol === 'https:' && !url.username && !url.password) return url.href;
-  } catch {
-    /* Invalid identity metadata uses the fallback. */
-  }
-}
+import { useCurrentProfile } from '@/profile/useCurrentProfile';
 
 export function AuthScreen() {
   const { t } = useTranslation();
-  const { status, session, message, pending, retry, signIn, signOut } = useAuth();
+  const { status, session, generation, client, message, pending, retry, signIn, signOut } =
+    useAuth();
+  const user = session?.user;
+  const { state: currentProfile, retry: retryProfile } = useCurrentProfile({
+    client,
+    ownerId: user?.id ?? null,
+    generation,
+    enabled: status === 'ready' && pending !== 'signOut',
+  });
   if (status === 'initializing') return <p role="status">{t(($) => $.auth.loading)}</p>;
   if (status === 'error')
     return (
@@ -27,37 +26,61 @@ export function AuthScreen() {
         <Button onClick={retry}>{t(($) => $.common.retry)}</Button>
       </>
     );
-
-  const user = session?.user;
-  const rawName: unknown = user?.user_metadata.full_name ?? user?.user_metadata.name;
-  const name =
-    typeof rawName === 'string' && rawName.trim() ? rawName : t(($) => $.auth.unknownName);
-  const initials =
-    typeof rawName === 'string' && rawName.trim()
-      ? rawName
-          .trim()
-          .split(/\s+/)
-          .slice(0, 2)
-          .map((part) => part[0])
-          .join('')
-          .toUpperCase()
-      : '?';
+  const profile = currentProfile.profile;
+  const name = profile?.displayName?.trim() || t(($) => $.profile.unknownName);
+  const initials = profile?.displayName?.trim()
+    ? profile.displayName
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0])
+        .join('')
+        .toUpperCase()
+    : '?';
   return (
     <>
       {user ? (
         <>
-          <Avatar>
-            <AvatarImage
-              src={safeImage(user.user_metadata.avatar_url ?? user.user_metadata.picture)}
-              alt={t(($) => $.auth.avatar)}
-              referrerPolicy="no-referrer"
-            />
-            <AvatarFallback role="img" aria-label={t(($) => $.auth.avatarFallback)}>
-              {initials}
-            </AvatarFallback>
-          </Avatar>
+          <section
+            className="flex w-full flex-col items-center gap-5"
+            aria-label={t(($) => $.profile.card)}
+          >
+            {profile && (
+              <Avatar>
+                <AvatarImage
+                  src={profile.avatarUrl ?? undefined}
+                  alt={t(($) => $.profile.avatar, { name })}
+                  referrerPolicy="no-referrer"
+                />
+                <AvatarFallback role="img" aria-label={t(($) => $.profile.avatarFallback)}>
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+            )}
+            {profile && (
+              <h1 className="w-full break-words text-2xl font-semibold tracking-tight">{name}</h1>
+            )}
+            {currentProfile.status === 'loading' && !profile && (
+              <p role="status">{t(($) => $.profile.loading)}</p>
+            )}
+            {currentProfile.status === 'missing' && (
+              <p role="status">{t(($) => $.profile.missing)}</p>
+            )}
+            {(currentProfile.status === 'error' || currentProfile.status === 'offline') && (
+              <>
+                <p role="alert">
+                  {t(($) =>
+                    currentProfile.status === 'offline' ? $.profile.offline : $.profile.error,
+                  )}
+                </p>
+                <Button variant="outline" onClick={retryProfile}>
+                  {t(($) => $.profile.retry)}
+                </Button>
+              </>
+            )}
+            {currentProfile.status === 'stale' && <p role="status">{t(($) => $.profile.stale)}</p>}
+          </section>
           <div className="w-full space-y-2 break-words">
-            <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
             <p className="text-sm text-muted-foreground">
               {user.email || t(($) => $.auth.unknownEmail)}
             </p>

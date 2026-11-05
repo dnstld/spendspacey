@@ -13,10 +13,19 @@ export const en = {
     signOut: 'Sign out',
     signingOut: 'Signing out…',
     callbackLoading: 'Completing sign-in…',
-    avatar: 'Google profile photo',
+    unknownEmail: 'Email unavailable',
+  },
+  profile: {
+    card: 'Your profile',
+    loading: 'Loading your profile…',
+    missing: 'Your database profile is not available.',
+    error: 'We could not load your profile safely.',
+    offline: 'Connect to load your profile, then try again.',
+    stale: 'This profile was loaded earlier on this page. Connect to refresh it.',
+    retry: 'Try loading the profile again',
+    avatar: '{{name}} profile photo',
     avatarFallback: 'Profile photo unavailable',
     unknownName: 'Name unavailable',
-    unknownEmail: 'Email unavailable',
   },
   pwa: {
     prepared:

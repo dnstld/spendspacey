@@ -74,6 +74,21 @@ async function serveArtifact(context: BrowserContext, origin: string, kind = 'pr
       }
       if (url.pathname === '/auth/v1/logout') return route.fulfill({ status: 204 });
       if (url.pathname === '/auth/v1/user') return route.fulfill({ json: syntheticSession().user });
+      if (url.pathname === '/rest/v1/profiles') {
+        expect(route.request().method()).toBe('GET');
+        expect(url.searchParams.get('select')).toBe('id,display_name,avatar_url,updated_at');
+        expect(url.searchParams.get('id')).toBe(`eq.${syntheticSession().user.id}`);
+        return route.fulfill({
+          json: [
+            {
+              id: syntheticSession().user.id,
+              display_name: 'Test Person',
+              avatar_url: null,
+              updated_at: '2026-10-30T12:00:00Z',
+            },
+          ],
+        });
+      }
     }
     if (url.href === 'https://images.example.test/avatar.png')
       return route.fulfill({ status: 404 });

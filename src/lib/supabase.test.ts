@@ -18,6 +18,20 @@ it('creates a single PKCE client with explicit callback ownership and persistent
       persistSession: true,
       autoRefreshToken: true,
     },
+    global: { fetch: expect.any(Function) },
+  });
+});
+
+it('bypasses the browser response cache for SDK requests', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { noStoreFetch } = await import('./supabase');
+  await noStoreFetch('https://auth.example.test/rest/v1/profiles', {
+    headers: { accept: 'application/json' },
+  });
+  expect(fetchMock).toHaveBeenCalledWith('https://auth.example.test/rest/v1/profiles', {
+    headers: { accept: 'application/json' },
+    cache: 'no-store',
   });
 });
 

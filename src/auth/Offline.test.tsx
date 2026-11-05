@@ -26,7 +26,7 @@ function offline() {
 }
 
 describe('offline authentication', () => {
-  it('keeps language and shell usable during unavailable restoration, and accepts a later SDK result', async () => {
+  it('keeps language and shell usable during unavailable restoration, and shows honest profile availability after a later SDK result', async () => {
     offline();
     const mock = authMock();
     const read = deferred<Awaited<ReturnType<typeof mock.auth.getSession>>>();
@@ -36,8 +36,9 @@ describe('offline authentication', () => {
     await userEvent.selectOptions(screen.getByRole('combobox'), 'pt-BR');
     expect(screen.getByRole('alert')).toHaveTextContent('Conecte-se');
     await act(async () => read.resolve({ data: { session: syntheticSession() }, error: null }));
-    expect(await screen.findByRole('heading')).toHaveTextContent('Test Person');
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(await screen.findByText('person@example.test')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('carregar seu perfil');
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
   });
   it('bounds a hung session read even when connectivity is reported online', async () => {
     vi.useFakeTimers();
@@ -90,7 +91,9 @@ describe('offline authentication', () => {
     act(() => window.dispatchEvent(new Event('online')));
     expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('link', { name: 'Back' }));
-    expect(await screen.findByRole('heading')).toHaveTextContent('Test Person');
+    expect(await screen.findByText('person@example.test')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('Connect to load your profile');
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     expect(mock.auth.signOut).not.toHaveBeenCalled();
   });
 });

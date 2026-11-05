@@ -29,6 +29,7 @@ async function mount(locale: 'en' | 'pt-BR' = 'en', overrides: Partial<AuthConte
   const value: AuthContextValue = {
     client: auth.client,
     status: 'ready',
+    generation: 0,
     pending: null,
     session: null,
     message: null,
