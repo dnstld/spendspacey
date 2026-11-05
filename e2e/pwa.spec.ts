@@ -184,6 +184,17 @@ test('Auth, OAuth, token, API, avatars and arbitrary static queries bypass every
       if (url.pathname.endsWith('/token')) return route.fulfill({ json: syntheticSession() });
       if (url.pathname.endsWith('/user')) return route.fulfill({ json: syntheticSession().user });
       if (url.pathname.endsWith('/logout')) return route.fulfill({ status: 204 });
+      if (url.pathname.endsWith('/rest/v1/profiles'))
+        return route.fulfill({
+          json: [
+            {
+              id: syntheticSession().user.id,
+              display_name: 'Test Person',
+              avatar_url: null,
+              updated_at: '2026-10-30T12:00:00Z',
+            },
+          ],
+        });
       return route.fulfill({ body: 'synthetic-private-marker' });
     });
     await context.route('https://images.example.test/**', (route) =>
@@ -253,6 +264,82 @@ test('Auth, OAuth, token, API, avatars and arbitrary static queries bypass every
     }
     expect(host.state.requests.length).toBeGreaterThan(beforeNavigationRequests);
     expect(errors).toEqual([]);
+  } finally {
+    await setOffline(context, false);
+    await host.close();
+  }
+});
+
+test('the production worker never persists the online current-user profile', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  let networkAvailable = true;
+  let profileReads = 0;
+  try {
+    await context.route('https://auth.example.test/**', async (route) => {
+      if (!networkAvailable) return route.abort('internetdisconnected');
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith('/authorize'))
+        return route.fulfill({
+          status: 302,
+          headers: { location: `${host.origin}/auth/callback?code=synthetic-code` },
+        });
+      if (url.pathname.endsWith('/token')) return route.fulfill({ json: syntheticSession() });
+      if (url.pathname.endsWith('/user')) return route.fulfill({ json: syntheticSession().user });
+      if (url.pathname.endsWith('/logout')) return route.fulfill({ status: 204 });
+      if (url.pathname.endsWith('/rest/v1/profiles')) {
+        expect(route.request().method()).toBe('GET');
+        expect(url.searchParams.get('select')).toBe('id,display_name,avatar_url,updated_at');
+        expect(url.searchParams.get('id')).toBe(`eq.${syntheticSession().user.id}`);
+        profileReads++;
+        return route.fulfill({
+          json: [
+            {
+              id: syntheticSession().user.id,
+              display_name: 'Database Profile',
+              avatar_url: null,
+              updated_at: '2026-10-30T12:00:00Z',
+            },
+          ],
+        });
+      }
+      return route.abort();
+    });
+    await prepared(page, host.origin);
+    await page.getByRole('button', { name: 'Sign in with Google' }).click();
+    await expect(page.getByRole('region', { name: 'Your profile' })).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Database Profile' })).toHaveCount(1);
+    expect(profileReads).toBe(1);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Database Profile' })).toHaveCount(1);
+    expect(profileReads).toBe(2);
+
+    const persistence = await page.evaluate(async () => ({
+      local: Object.fromEntries(
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)!).map(
+          (key) => [key, localStorage.getItem(key)],
+        ),
+      ),
+      databases: (await indexedDB.databases()).map(({ name }) => name),
+    }));
+    expect(JSON.stringify(persistence.local)).not.toContain('Database Profile');
+    expect(persistence.databases).toEqual([]);
+    const beforeOffline = await inventory(page);
+    expect(beforeOffline.some(({ url }) => /\/rest\/v1\/profiles/.test(url))).toBe(false);
+    expect(beforeOffline.some(({ body }) => body.includes('Database Profile'))).toBe(false);
+
+    networkAvailable = false;
+    await setOffline(context, true);
+    await page.reload();
+    await expect(page.getByRole('alert')).toContainText('Connect to load your profile');
+    await expect(page.getByRole('heading', { name: 'Database Profile' })).toHaveCount(0);
+    await expect(page.getByText('person@example.test')).toBeVisible();
+    expect(profileReads).toBe(2);
+    const offlineInventory = await inventory(page);
+    expect(offlineInventory.some(({ url }) => /\/rest\/v1\/profiles/.test(url))).toBe(false);
+    expect(offlineInventory.some(({ body }) => body.includes('Database Profile'))).toBe(false);
   } finally {
     await setOffline(context, false);
     await host.close();
@@ -842,6 +929,21 @@ test('offline logout preserves the session; actual SDK failure follows cleared l
   const host = await pwaServer();
   let logoutRequests = 0;
   try {
+    await context.route('https://auth.example.test/auth/v1/user**', (route) =>
+      route.fulfill({ json: syntheticSession().user }),
+    );
+    await context.route('https://auth.example.test/rest/v1/profiles**', (route) =>
+      route.fulfill({
+        json: [
+          {
+            id: syntheticSession().user.id,
+            display_name: 'Test Person',
+            avatar_url: null,
+            updated_at: '2026-10-30T12:00:00Z',
+          },
+        ],
+      }),
+    );
     await context.route('https://images.example.test/**', (route) =>
       route.fulfill({ status: 404 }),
     );

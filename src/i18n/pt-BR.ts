@@ -15,10 +15,19 @@ export const ptBR = {
     signOut: 'Sair',
     signingOut: 'Saindo…',
     callbackLoading: 'Concluindo o login…',
-    avatar: 'Foto do perfil do Google',
+    unknownEmail: 'E-mail indisponível',
+  },
+  profile: {
+    card: 'Seu perfil',
+    loading: 'Carregando seu perfil…',
+    missing: 'Seu perfil no banco de dados não está disponível.',
+    error: 'Não foi possível carregar seu perfil com segurança.',
+    offline: 'Conecte-se para carregar seu perfil e tente novamente.',
+    stale: 'Este perfil foi carregado antes nesta página. Conecte-se para atualizá-lo.',
+    retry: 'Tentar carregar o perfil novamente',
+    avatar: 'Foto do perfil de {{name}}',
     avatarFallback: 'Foto de perfil indisponível',
     unknownName: 'Nome indisponível',
-    unknownEmail: 'E-mail indisponível',
   },
   pwa: {
     prepared:

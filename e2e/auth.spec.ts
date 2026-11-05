@@ -154,6 +154,56 @@ test('broken avatar keeps the authenticated identity usable', async ({ page, aut
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeEnabled();
 });
 
+test('profile failures remain localized and retry only the current-user read', async ({
+  page,
+  auth,
+}) => {
+  auth.profileMode = 'malformed';
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  await expect(page.getByRole('alert')).toContainText('could not load your profile safely');
+  await expect(page.getByText('person@example.test')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
+  expect(auth.profileReads).toBe(1);
+  auth.profileMode = 'success';
+  await page.getByRole('button', { name: 'Try loading the profile again' }).click();
+  await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
+  expect(auth.profileReads).toBe(2);
+});
+
+test('a missing profile never fabricates a database card', async ({ page, auth }) => {
+  auth.profileMode = 'missing';
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  await expect(page.getByText('Your database profile is not available.')).toBeVisible();
+  await expect(page.getByText('person@example.test')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
+  expect(auth.profileReads).toBe(1);
+});
+
+test('one localized current-user card stays on the root route at narrow width', async ({
+  page,
+  auth,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  await expect(page.getByRole('region', { name: 'Your profile' })).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(1);
+  await expect(page.getByText('person@example.test')).toHaveCount(1);
+  expect(auth.profileReads).toBe(1);
+  await page.goto('/profiles');
+  await expect(page).toHaveURL('http://127.0.0.1:4173/');
+  await expect(page.getByRole('region', { name: 'Your profile' })).toHaveCount(1);
+  await page.getByRole('combobox', { name: 'Language' }).selectOption('pt-BR');
+  await expect(page.getByRole('region', { name: 'Seu perfil' })).toHaveCount(1);
+  await expect(page.getByRole('img', { name: 'Foto do perfil de Test Person' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('combobox', { name: 'Idioma' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Sair' })).toBeFocused();
+});
+
 test('current-session sign-out is reflected in a second tab', async ({ page, context }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Sign in with Google' }).click();
@@ -163,6 +213,8 @@ test('current-session sign-out is reflected in a second tab', async ({ page, con
   await expect(second.getByRole('heading', { name: 'Test Person' })).toBeVisible();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(second.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
+  await expect(second.getByRole('region', { name: 'Your profile' })).toHaveCount(0);
+  await expect(second.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
 });
 
 test('PKCE callback, session restoration, preference persistence, and local sign-out', async ({
@@ -174,7 +226,7 @@ test('PKCE callback, session restoration, preference persistence, and local sign
   await page.getByRole('button', { name: 'Entrar com o Google' }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
   await expect(page.getByText('person@example.test')).toBeVisible();
-  await expect(page.getByRole('img', { name: 'Foto do perfil do Google' })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Foto do perfil de Test Person' })).toBeVisible();
   await expect(page).toHaveURL('http://127.0.0.1:4173/');
   expect(auth.exchanges).toBe(1);
   await page.reload();

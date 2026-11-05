@@ -5,6 +5,7 @@ import type { AuthMessage } from './errors';
 export interface AuthState {
   status: 'initializing' | 'ready' | 'error';
   session: Session | null;
+  generation: number;
 }
 
 export interface AuthContextValue extends AuthState {

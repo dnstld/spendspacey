@@ -9,6 +9,9 @@ interface AuthFixture {
   exchanges: number;
   brokenAvatar: boolean;
   returnPath: string;
+  profileReads: number;
+  profileMode: 'success' | 'missing' | 'error' | 'malformed';
+  networkAvailable: boolean;
 }
 
 export const test = base.extend<{ auth: AuthFixture }>({
@@ -19,6 +22,9 @@ export const test = base.extend<{ auth: AuthFixture }>({
         exchanges: 0,
         brokenAvatar: false,
         returnPath: callbackRoute.path,
+        profileReads: 0,
+        profileMode: 'success',
+        networkAvailable: true,
       };
       const unexpected: string[] = [];
       const errors: string[] = [];
@@ -48,6 +54,7 @@ export const test = base.extend<{ auth: AuthFixture }>({
           });
         }
         if (url.origin === SYNTHETIC_ENV.VITE_SUPABASE_URL) {
+          if (!auth.networkAvailable) return route.abort('internetdisconnected');
           if (url.pathname === '/auth/v1/authorize') {
             const callback = url.searchParams.get('redirect_to');
             expect(callback).toBe(`${baseURL}${callbackRoute.path}`);
@@ -87,8 +94,36 @@ export const test = base.extend<{ auth: AuthFixture }>({
             expect(url.searchParams.get('scope')).toBe('local');
             return route.fulfill({ status: 204 });
           }
+          if (url.pathname === '/rest/v1/profiles') {
+            expect(route.request().method()).toBe('GET');
+            expect(url.searchParams.get('select')).toBe('id,display_name,avatar_url,updated_at');
+            expect(url.searchParams.get('id')).toBe(`eq.${syntheticSession().user.id}`);
+            auth.profileReads++;
+            if (auth.profileMode === 'error')
+              return route.fulfill({
+                status: 500,
+                json: { code: 'XX000', message: 'synthetic private diagnostic' },
+              });
+            if (auth.profileMode === 'missing') return route.fulfill({ json: [] });
+            return route.fulfill({
+              json: [
+                {
+                  id: syntheticSession().user.id,
+                  display_name: 'Test Person',
+                  avatar_url:
+                    auth.profileMode === 'malformed'
+                      ? { unsafe: true }
+                      : 'https://images.example.test/profile.png',
+                  updated_at: '2026-10-30T12:00:00Z',
+                },
+              ],
+            });
+          }
         }
-        if (url.href === 'https://images.example.test/avatar.png') {
+        if (
+          url.href === 'https://images.example.test/avatar.png' ||
+          url.href === 'https://images.example.test/profile.png'
+        ) {
           return auth.brokenAvatar
             ? route.fulfill({ status: 404 })
             : route.fulfill({
