@@ -1285,7 +1285,7 @@ for (const mode of [
     } finally {
       if (context !== defaultContext) await context.close();
       await host.close();
-      await rm(profile, { recursive: true, force: true });
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 }
@@ -1562,7 +1562,7 @@ for (const termination of ['graceful', 'abrupt'] as const) {
     } finally {
       await context?.close();
       await host.close();
-      await rm(profile, { recursive: true, force: true });
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 }
@@ -1940,7 +1940,7 @@ for (const termination of ['graceful', 'abrupt'])
     } finally {
       await context.close();
       await host.close();
-      await rm(profile, { recursive: true, force: true });
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
