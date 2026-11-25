@@ -111,6 +111,17 @@ for (const locale of ['en', 'pt-BR'])
       expect(
         await second.evaluate(async () => (await fetch('/fonts/google-sans-medium.woff2')).ok),
       ).toBe(true);
+      const lato = await second.evaluate(async () => {
+        const faces = await Promise.all([
+          document.fonts.load('400 16px Lato'),
+          document.fonts.load('700 16px Lato'),
+        ]);
+        return faces.flat().map(({ family, status, weight }) => ({ family, status, weight }));
+      });
+      expect(lato).toEqual([
+        { family: 'Lato', status: 'loaded', weight: '400' },
+        { family: 'Lato', status: 'loaded', weight: '700' },
+      ]);
     } finally {
       await setOffline(context, false);
       await host.close();

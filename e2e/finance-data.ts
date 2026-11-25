@@ -12,7 +12,7 @@ const owner = syntheticSession().user.id;
 export const familyMember = '20000000-0000-4000-8000-000000000001';
 
 export function isFinancePath(path: string) {
-  return /^\/rest\/v1\/(?:wallet_members|wallets|categories|category_items|transactions|rpc\/(?:list_wallet_members|create_web_wallet|delete_web_personal_wallet))$/.test(
+  return /^\/rest\/v1\/(?:wallet_members|wallets|categories|category_items|transactions|rpc\/(?:list_wallet_members|create_web_wallet|delete_web_personal_wallet|save_web_transaction))$/.test(
     path,
   );
 }
@@ -63,7 +63,7 @@ export function financeFixture() {
       on_behalf_of: null,
     },
   ];
-  const failures = { transaction: false };
+  const failures = { transaction: false, transactionResponse: false };
 
   async function handle(route: Route) {
     const request = route.request();
@@ -165,19 +165,47 @@ export function financeFixture() {
           );
           return json(url.searchParams.get('limit') === '1' ? list.slice(0, 1) : list);
         }
+        return route.fulfill({ status: 405 });
+      }
+      case '/rest/v1/rpc/save_web_transaction': {
         if (failures.transaction) {
           failures.transaction = false;
           return route.fulfill({ status: 400, json: { code: 'synthetic-failure' } });
         }
-        const data = request.postDataJSON();
-        if (method === 'POST') {
-          if (rows.some((row) => row.id === data.id)) return json([]);
-          rows.unshift({ updated_by: null, ...data });
-          return json([{ id: data.id }]);
+        const { p_expected_actor, p_transaction_id, p_wallet_id, p_edit, p_draft } =
+          request.postDataJSON();
+        if (p_expected_actor !== owner) return route.fulfill({ status: 403 });
+        const row = rows.find(
+          (value) => value.id === p_transaction_id && value.wallet_id === p_wallet_id,
+        );
+        if (p_edit) {
+          if (!row) return route.fulfill({ status: 403 });
+          Object.assign(row, p_draft, { updated_by: owner });
+        } else if (row) {
+          if (
+            Object.entries(p_draft).some(
+              ([field, value]) => row[field as keyof Transaction] !== value,
+            )
+          ) {
+            return route.fulfill({
+              status: 409,
+              json: { message: 'web_transaction_retry_conflict' },
+            });
+          }
+        } else {
+          rows.unshift({
+            id: p_transaction_id,
+            wallet_id: p_wallet_id,
+            created_by: owner,
+            updated_by: null,
+            ...p_draft,
+          });
         }
-        const row = rows.find((value) => value.id === id && value.wallet_id === walletId);
-        if (row) Object.assign(row, data, { updated_by: owner });
-        return json(row ? [{ id }] : []);
+        if (failures.transactionResponse) {
+          failures.transactionResponse = false;
+          return route.abort('failed');
+        }
+        return json(p_transaction_id);
       }
       default:
         return undefined;

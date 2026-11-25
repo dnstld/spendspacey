@@ -38,13 +38,13 @@ export async function readWallets(client: SupabaseClient, userId: string, signal
   }));
 }
 
-export function readWalletData(client: SupabaseClient, wallet: Wallet, signal: AbortSignal) {
+export function readWalletData(client: SupabaseClient, walletId: string, signal: AbortSignal) {
   return Promise.all([
     allRows((from, to) =>
       client
         .from('categories')
         .select('id,name,type,archived_at')
-        .eq('wallet_id', wallet.id)
+        .eq('wallet_id', walletId)
         .order('id')
         .range(from, to)
         .abortSignal(signal)
@@ -54,14 +54,14 @@ export function readWalletData(client: SupabaseClient, wallet: Wallet, signal: A
       client
         .from('category_items')
         .select('id,category_id,name,default_amount_cents,archived_at')
-        .eq('wallet_id', wallet.id)
+        .eq('wallet_id', walletId)
         .order('id')
         .range(from, to)
         .abortSignal(signal)
         .returns<CategoryItem[]>(),
     ),
     client
-      .rpc('list_wallet_members', { p_wallet_id: wallet.id })
+      .rpc('list_wallet_members', { p_wallet_id: walletId })
       .abortSignal(signal)
       .then(({ data, error }) => {
         if (error || !Array.isArray(data)) throw error || new Error('Participantes indisponíveis.');
@@ -70,7 +70,7 @@ export function readWalletData(client: SupabaseClient, wallet: Wallet, signal: A
     client
       .from('transactions')
       .select('occurred_at')
-      .eq('wallet_id', wallet.id)
+      .eq('wallet_id', walletId)
       .eq('status', 'completed')
       .order('occurred_at')
       .limit(1)
@@ -117,6 +117,7 @@ export function readDuplicates(
   categoryId: string,
   day: string,
   amount: number,
+  signal: AbortSignal,
 ) {
   return client
     .from('transactions')
@@ -127,6 +128,7 @@ export function readDuplicates(
     .eq('occurred_at', day)
     .eq('amount_cents', amount)
     .order('created_at', { ascending: false })
+    .abortSignal(signal)
     .returns<Transaction[]>()
     .then(checked);
 }

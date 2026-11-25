@@ -63,14 +63,14 @@
 
 @font-face {
   font-family: Lato;
-  src: url('/fonts/lato-regular.ttf') format('truetype');
+  src: url('./assets/lato-regular.ttf?inline') format('truetype');
   font-display: swap;
   font-weight: 400;
 }
 
 @font-face {
   font-family: Lato;
-  src: url('/fonts/lato-bold.ttf') format('truetype');
+  src: url('./assets/lato-bold.ttf?inline') format('truetype');
   font-display: swap;
   font-weight: 700;
 }

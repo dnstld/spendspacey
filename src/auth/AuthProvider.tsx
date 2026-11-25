@@ -1,17 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthContext, type AuthState } from './context';
 import { authMessage, requireAuthStorage, type AuthMessage } from './errors';
 import { authenticationAllowed } from '@/lib/deployment';
+import { nextGeneration } from './generation';
 import { callbackRoute } from '@/lib/callbackRoute';
-
-const clientGenerations = new WeakMap<SupabaseClient, number>();
-
-function nextGeneration(client: SupabaseClient) {
-  const generation = (clientGenerations.get(client) ?? 0) + 1;
-  clientGenerations.set(client, generation);
-  return generation;
-}
 
 export function AuthProvider({
   client,
@@ -29,6 +22,18 @@ export function AuthProvider({
   const [message, setMessage] = useState<AuthMessage | null>(null);
   const [pending, setPending] = useState<'signIn' | 'signOut' | null>(null);
   const operation = useRef(false);
+  const owner = useRef<string | undefined>(undefined);
+  const authGeneration = useRef(0);
+  const observeOwner = useCallback(
+    (nextOwner?: string) => {
+      if (owner.current !== nextOwner) {
+        owner.current = nextOwner;
+        authGeneration.current = nextGeneration(client);
+      }
+      return authGeneration.current;
+    },
+    [client],
+  );
 
   useEffect(() => {
     if (!authenticationAllowed()) return;
@@ -40,14 +45,7 @@ export function AuthProvider({
       if (!active || event === 'INITIAL_SESSION') return;
       // The explicit read owns INITIAL_SESSION; only newer changes supersede it.
       revision++;
-      setState((previous) => ({
-        status: 'ready',
-        session,
-        generation:
-          previous.session?.user.id === session?.user.id
-            ? previous.generation
-            : nextGeneration(client),
-      }));
+      setState({ status: 'ready', session, generation: observeOwner(session?.user.id) });
       setMessage(null);
     });
     const readRevision = revision;
@@ -79,14 +77,11 @@ export function AuthProvider({
           setState((previous) => ({ ...previous, status: 'error' }));
           setMessage(navigator.onLine === false ? 'offlineRestore' : authMessage(error, 'restore'));
         } else {
-          setState((previous) => ({
+          setState({
             status: 'ready',
             session: data.session,
-            generation:
-              previous.session?.user.id === data.session?.user.id
-                ? previous.generation
-                : nextGeneration(client),
-          }));
+            generation: observeOwner(data.session?.user.id),
+          });
           setMessage(null);
         }
       })
@@ -104,7 +99,7 @@ export function AuthProvider({
       window.removeEventListener('offline', unavailable);
       subscription.unsubscribe();
     };
-  }, [client, attempt]);
+  }, [client, attempt, observeOwner]);
 
   function retry() {
     if (!authenticationAllowed()) return;
@@ -156,7 +151,9 @@ export function AuthProvider({
     }
     operation.current = true;
     setPending('signOut');
-    setState((previous) => ({ ...previous, generation: nextGeneration(client) }));
+    const generation = nextGeneration(client);
+    authGeneration.current = generation;
+    setState((previous) => ({ ...previous, generation }));
     setMessage(null);
     try {
       const { error } = await client.auth.signOut({ scope: 'local' });

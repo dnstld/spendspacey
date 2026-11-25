@@ -5,6 +5,7 @@ import { PwaFeedback } from '@/pwa/PwaFeedback';
 import { useTranslation } from 'react-i18next';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { isCurrentAuthGeneration } from './generation';
 import { useAuth } from './context';
 import { Feedback } from './Feedback';
 import { GoogleSignInButton } from './GoogleSignInButton';
@@ -53,6 +54,7 @@ export function AuthScreen() {
         userId={user.id}
         key={`${user.id}:${generation}`}
         connected={status === 'ready' && pending !== 'signOut'}
+        accountIsCurrent={() => isCurrentAuthGeneration(client, generation)}
         account={
           <div className="space-y-5 border-t pt-5 text-center">
             <section

@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChevronRight, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -48,6 +48,8 @@ export function TransactionForm({
   wallet,
   userId,
   online,
+  authorized,
+  accountIsCurrent,
   client,
   rankedRows,
   close,
@@ -60,6 +62,8 @@ export function TransactionForm({
   wallet: Wallet;
   userId: string;
   online: boolean;
+  authorized: boolean;
+  accountIsCurrent: () => boolean;
   client: SupabaseClient;
   rankedRows: Transaction[];
   close: () => void;
@@ -82,8 +86,17 @@ export function TransactionForm({
   const [search, setSearch] = useState('');
   const [duplicates, setDuplicates] = useState<Transaction[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<'failed' | 'conflict' | null>(null);
   const pending = useRef(false);
+  const activeWrite = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    const cancel = () => activeWrite.current?.abort();
+    window.addEventListener('offline', cancel);
+    return () => {
+      window.removeEventListener('offline', cancel);
+      cancel();
+    };
+  }, [online, authorized]);
   const creationId = useRef(crypto.randomUUID());
   const category = categories.find((value) => value.id === categoryId);
   const categoryUsage = new Map<string, number>();
@@ -119,10 +132,10 @@ export function TransactionForm({
   );
   const mostUsed = filtered.filter((value) => categoryUsage.has(value.id)).slice(0, 5);
   const rest = filtered.filter((value) => !mostUsed.includes(value));
-  const canSave = online && !!category && !!day && amount > 0 && !busy;
+  const canSave = online && authorized && !!category && !!day && amount > 0 && !busy;
 
   function move(next: Step, value = '') {
-    setError(false);
+    setError(null);
     setSearch(value);
     setStep(next);
   }
@@ -137,51 +150,72 @@ export function TransactionForm({
     if (!amount && value.default_amount_cents) setAmount(value.default_amount_cents);
     move('form');
   }
-  async function run(action: () => Promise<void>) {
-    if (!online || navigator.onLine === false || pending.current) return;
+  function canWrite(signal?: AbortSignal) {
+    return (
+      online && authorized && navigator.onLine !== false && accountIsCurrent() && !signal?.aborted
+    );
+  }
+  async function run(action: (signal: AbortSignal) => Promise<void>) {
+    if (!canWrite() || pending.current) return;
+    const controller = new AbortController();
+    activeWrite.current = controller;
     pending.current = true;
     setBusy(true);
-    setError(false);
+    setError(null);
     try {
-      await action();
-    } catch {
-      setError(true);
+      await action(controller.signal);
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      setError(
+        cause &&
+          typeof cause === 'object' &&
+          'message' in cause &&
+          cause.message === 'web_transaction_retry_conflict'
+          ? 'conflict'
+          : 'failed',
+      );
     } finally {
+      activeWrite.current = null;
       pending.current = false;
       setBusy(false);
     }
   }
   function save(confirmed = false) {
     if (!canSave) return;
-    void run(async () => {
+    void run(async (signal) => {
       if (!current && !confirmed) {
-        const matches = (await readDuplicates(client, wallet.id, categoryId, day, amount)).filter(
-          (value) => value.id !== creationId.current,
-        );
+        const matches = (
+          await readDuplicates(client, wallet.id, categoryId, day, amount, signal)
+        ).filter((value) => value.id !== creationId.current);
+        if (!canWrite(signal)) return;
         if (matches.length) {
           setDuplicates(matches);
           move('duplicate');
           return;
         }
       }
-      const values = {
-        category_id: categoryId,
-        occurred_at: day,
-        amount_cents: amount,
-        description: description.trim(),
-        category_item_id: itemId,
-        on_behalf_of: beneficiary === (current?.created_by ?? userId) ? null : beneficiary,
-      };
-      const write = current
-        ? client.from('transactions').update(values).eq('wallet_id', wallet.id).eq('id', current.id)
-        : client
-            .from('transactions')
-            .upsert(
-              { ...values, id: creationId.current, wallet_id: wallet.id, created_by: userId },
-              { onConflict: 'id', ignoreDuplicates: true },
-            );
-      const saved = checked(await write.select('id'));
-      if (current && saved.length !== 1) throw new Error('Transação indisponível.');
+      if (!canWrite(signal)) return;
+      const transactionId = current?.id ?? creationId.current;
+      const saved = checked(
+        await client
+          .rpc('save_web_transaction', {
+            p_expected_actor: userId,
+            p_transaction_id: transactionId,
+            p_wallet_id: wallet.id,
+            p_edit: !!current,
+            p_draft: {
+              category_id: categoryId,
+              occurred_at: day,
+              amount_cents: amount,
+              description: description.trim(),
+              category_item_id: itemId,
+              on_behalf_of: beneficiary === (current?.created_by ?? userId) ? null : beneficiary,
+            },
+          })
+          .abortSignal(signal),
+      );
+      if (!canWrite(signal)) return;
+      if (saved !== transactionId) throw new Error('Transação indisponível.');
       onSaved();
       close();
     });
@@ -211,6 +245,7 @@ export function TransactionForm({
     item: 'Para quê?',
     duplicate: 'Possível duplicidade',
   }[step];
+  if (online && !authorized) return null;
   return (
     <Dialog
       open
@@ -240,7 +275,22 @@ export function TransactionForm({
           <FinanceState
             kind="error"
             title="Não foi possível concluir"
-            description="Seu rascunho continua aqui. Confira a conexão e tente novamente."
+            description={
+              error === 'conflict'
+                ? 'Já existe uma versão salva desta transação. Feche o rascunho e abra a transação na lista para alterá-la.'
+                : 'Seu rascunho continua aqui. Confira a conexão e tente novamente.'
+            }
+            action={
+              error === 'conflict'
+                ? {
+                    label: 'Voltar à lista',
+                    run: () => {
+                      onSaved();
+                      close();
+                    },
+                  }
+                : undefined
+            }
           />
         )}
         {step === 'form' && (

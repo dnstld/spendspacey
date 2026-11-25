@@ -69,3 +69,81 @@ revoke execute on function public.create_web_wallet(uuid, text, text) from publi
 revoke execute on function public.delete_web_personal_wallet(uuid) from public, anon, service_role;
 grant execute on function public.create_web_wallet(uuid, text, text) to authenticated;
 grant execute on function public.delete_web_personal_wallet(uuid) to authenticated;
+
+-- Keep the Contas rename and display preference writes. Creator identity
+-- remains writable by internal database operations, including FK cleanup.
+revoke update on public.wallets from public, anon, authenticated;
+revoke update (created_by) on public.wallets from public, anon, authenticated;
+grant update (name, show_revenue) on public.wallets to authenticated;
+
+create function public.save_web_transaction(
+  p_expected_actor uuid,
+  p_transaction_id uuid,
+  p_wallet_id uuid,
+  p_edit boolean,
+  p_draft jsonb
+)
+returns uuid
+language plpgsql security invoker set search_path = ''
+as $$
+declare
+  actor uuid := auth.uid();
+  draft public.transactions;
+  saved_id uuid;
+begin
+  if actor is null or actor is distinct from p_expected_actor then
+    raise exception 'web_transaction_actor_changed' using errcode = '42501';
+  end if;
+
+  draft := pg_catalog.jsonb_populate_record(null::public.transactions, p_draft);
+  if not exists (
+    select 1 from public.categories c
+    where c.id = draft.category_id and c.wallet_id = p_wallet_id
+  ) then
+    raise exception 'web_transaction_category_unavailable' using errcode = '42501';
+  end if;
+
+  if p_edit then
+    update public.transactions t
+      set category_id = draft.category_id, occurred_at = draft.occurred_at,
+        amount_cents = draft.amount_cents, description = draft.description,
+        category_item_id = draft.category_item_id, on_behalf_of = draft.on_behalf_of
+      where t.id = p_transaction_id and t.wallet_id = p_wallet_id and t.status = 'completed'
+      returning t.id into saved_id;
+
+    if saved_id is null then
+      raise exception 'web_transaction_unavailable' using errcode = '42501';
+    end if;
+    return saved_id;
+  end if;
+
+  insert into public.transactions (
+    id, wallet_id, created_by, category_id, occurred_at, amount_cents, description,
+    category_item_id, on_behalf_of
+  ) values (
+    p_transaction_id, p_wallet_id, actor, draft.category_id, draft.occurred_at,
+    draft.amount_cents, draft.description, draft.category_item_id, nullif(draft.on_behalf_of, actor)
+  ) on conflict (id) do nothing returning id into saved_id;
+
+  if saved_id is not null then
+    return saved_id;
+  end if;
+
+  if exists (
+    select 1 from public.transactions t
+    where t.id = p_transaction_id and t.wallet_id = p_wallet_id and t.created_by = actor
+      and t.status = 'completed'
+      and (t.category_id, t.occurred_at, t.amount_cents, t.description, t.category_item_id, t.on_behalf_of)
+        is not distinct from (draft.category_id, draft.occurred_at, draft.amount_cents,
+          draft.description, draft.category_item_id, nullif(draft.on_behalf_of, actor))
+  ) then
+    return p_transaction_id;
+  end if;
+  raise exception 'web_transaction_retry_conflict' using errcode = '23505';
+end;
+$$;
+
+revoke execute on function public.save_web_transaction(uuid, uuid, uuid, boolean, jsonb)
+  from public, anon, service_role;
+grant execute on function public.save_web_transaction(uuid, uuid, uuid, boolean, jsonb)
+  to authenticated;

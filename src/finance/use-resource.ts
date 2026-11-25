@@ -8,31 +8,54 @@ export function useResource<T>(
   key: string | null,
   online: boolean,
   read: (signal: AbortSignal) => Promise<T>,
+  { fresh = false, timeout }: { fresh?: boolean; timeout?: number } = {},
 ) {
   const [result, setResult] = useState<Result<T>>();
-  const [revision, setRevision] = useState(0);
-  const retry = useCallback(() => setRevision((value) => value + 1), []);
+  const [request, setRequest] = useState({ revision: 0, minimum: 0 });
+  const { revision, minimum } = request;
+  const retry = useCallback(
+    () => setRequest(({ revision }) => ({ revision: revision + 1, minimum: revision + 1 })),
+    [],
+  );
+  const poll = useCallback(
+    () => setRequest(({ revision, minimum }) => ({ revision: revision + 1, minimum })),
+    [],
+  );
   useEffect(() => {
     if (!key || !online) return;
     const controller = new AbortController();
+    const timer =
+      timeout === undefined
+        ? undefined
+        : window.setTimeout(() => {
+            controller.abort();
+            setResult({ key, revision, status: 'error' });
+          }, timeout);
     void Promise.resolve()
       .then(() => read(controller.signal))
       .then(
         (data) => {
+          window.clearTimeout(timer);
           if (!controller.signal.aborted) setResult({ key, revision, status: 'ready', data });
         },
         () => {
+          window.clearTimeout(timer);
           if (!controller.signal.aborted) setResult({ key, revision, status: 'error' });
         },
       );
-    return () => controller.abort();
-  }, [key, online, read, revision]);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [key, online, read, revision, timeout]);
 
-  const current = result?.key === key ? result : undefined;
+  const current =
+    result?.key === key && (!fresh || (online && result.revision >= minimum)) ? result : undefined;
   return {
     data: current?.data,
     error: online && current?.revision === revision && current?.status === 'error',
     retry,
+    poll,
   };
 }
 

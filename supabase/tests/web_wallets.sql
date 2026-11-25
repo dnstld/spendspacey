@@ -9,7 +9,8 @@ insert into auth.users (id, email) values
 do $$
 begin
   if has_function_privilege('anon', 'public.create_web_wallet(uuid,text,text)', 'EXECUTE')
-    or has_function_privilege('anon', 'public.delete_web_personal_wallet(uuid)', 'EXECUTE') then
+    or has_function_privilege('anon', 'public.delete_web_personal_wallet(uuid)', 'EXECUTE')
+    or has_function_privilege('anon', 'public.save_web_transaction(uuid,uuid,uuid,boolean,jsonb)', 'EXECUTE') then
     raise exception 'Anonymous callers have access';
   end if;
 end
@@ -70,6 +71,16 @@ begin
   exception when insufficient_privilege then null;
   end;
   perform set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000002', true);
+  update public.wallets set name = 'Renamed', show_revenue = true where id = wallet_id;
+  if not exists (select 1 from public.wallets where id = wallet_id and name = 'Renamed' and show_revenue) then
+    raise exception 'Contas rename or display preference was denied';
+  end if;
+  begin
+    update public.wallets set created_by = auth.uid() where id = wallet_id;
+    raise exception 'Client could replace the wallet creator';
+  exception when insufficient_privilege then null;
+  end;
+
   begin
     perform public.delete_web_personal_wallet(wallet_id);
     raise exception 'Non-owner could delete the wallet';
@@ -91,12 +102,40 @@ declare
   target_wallet uuid := '20000000-0000-4000-8000-000000000004';
   target_category uuid;
   target_item uuid;
+  target_transaction uuid := '30000000-0000-4000-8000-000000000001';
+  owner uuid := auth.uid();
+  other_member uuid := '10000000-0000-4000-8000-000000000002';
+  draft jsonb;
 begin
   insert into public.categories (wallet_id, name, type) values (target_wallet, 'Mercado', 'expense') returning id into target_category;
   insert into public.category_items (wallet_id, category_id, name, default_amount_cents)
     values (target_wallet, target_category, 'Compras', 1200) returning id into target_item;
-  insert into public.transactions (wallet_id, category_id, category_item_id, amount_cents, occurred_at, created_by)
-    values (target_wallet, target_category, target_item, 1200, '2026-11-25', auth.uid());
+  draft := jsonb_build_object(
+    'category_id', target_category, 'category_item_id', target_item, 'occurred_at', '2026-11-25',
+    'amount_cents', 1200, 'description', 'Compras', 'on_behalf_of', null, 'created_by', other_member
+  );
+  begin
+    perform public.save_web_transaction(other_member, target_transaction, target_wallet, false, draft);
+    raise exception 'Transaction save accepted the wrong actor';
+  exception when insufficient_privilege then null;
+  end;
+  if public.save_web_transaction(owner, target_transaction, target_wallet, false, draft) <> target_transaction
+    or public.save_web_transaction(owner, target_transaction, target_wallet, false, draft) <> target_transaction then
+    raise exception 'Save or identical retry did not return the saved transaction';
+  end if;
+  if not exists (select 1 from public.transactions where id = target_transaction and created_by = owner) then
+    raise exception 'Saved transaction was not bound to the authenticated actor';
+  end if;
+  begin
+    perform public.save_web_transaction(owner, target_transaction, target_wallet, false, draft || '{"amount_cents":1300}');
+    raise exception 'A changed draft was reported saved on a retry';
+  exception when unique_violation then
+    if sqlerrm <> 'web_transaction_retry_conflict' then raise; end if;
+  end;
+  perform public.save_web_transaction(owner, target_transaction, target_wallet, true, draft || '{"amount_cents":1400}');
+  if not exists (select 1 from public.transactions where id = target_transaction and amount_cents = 1400) then
+    raise exception 'An explicit edit did not update the transaction';
+  end if;
   if public.delete_web_personal_wallet(target_wallet) <> target_wallet then
     raise exception 'Personal deletion failed';
   end if;

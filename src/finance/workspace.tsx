@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FinanceHeader, FinanceDock } from './chrome';
 import { Categories } from './categories';
@@ -17,38 +17,60 @@ export function FinanceWorkspace({
   userId,
   account,
   connected = true,
+  accountIsCurrent,
 }: {
   client: SupabaseClient;
   userId: string;
   account: ReactNode;
   connected?: boolean;
+  accountIsCurrent: () => boolean;
 }) {
   const online = useOnline() && connected;
   const [view, setView] = useState<View>('transactions');
   const [period, setPeriod] = useState<Period>('month');
+  const [access, setAccess] = useState({ online, epoch: 0 });
+  if (access.online !== online) setAccess({ online, epoch: access.epoch + 1 });
   const [selected, setSelected] = useState<string>();
   const list = useResource(
-    userId,
+    `${userId}:${access.epoch}`,
     online,
     useCallback((signal) => readWallets(client, userId, signal), [client, userId]),
+    { fresh: true, timeout: 10_000 },
   );
+  const { retry: revalidateAccess, poll: pollAccess } = list;
+  useEffect(() => {
+    if (!online) return;
+    const refreshOnForeground = () => {
+      if (document.visibilityState === 'visible') revalidateAccess();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') pollAccess();
+    }, 30_000);
+    window.addEventListener('focus', refreshOnForeground);
+    document.addEventListener('visibilitychange', refreshOnForeground);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshOnForeground);
+      document.removeEventListener('visibilitychange', refreshOnForeground);
+    };
+  }, [online, revalidateAccess, pollAccess]);
   const wallets = list.data ?? [];
   const active = wallets.find((wallet) => wallet.id === selected) ?? wallets[0];
   const { start, end } = periodRange(period);
   const activeId = active?.id;
   const details = useResource(
-    activeId ?? null,
+    activeId ? `${access.epoch}:${activeId}` : null,
     online,
     useCallback(
       (signal) =>
-        active
-          ? readWalletData(client, active, signal)
+        activeId
+          ? readWalletData(client, activeId, signal)
           : Promise.reject(new Error('Nenhuma carteira selecionada.')),
-      [active, client],
+      [activeId, client],
     ),
   );
   const transactions = useResource(
-    activeId ? `${activeId}:${start}:${end}` : null,
+    activeId ? `${access.epoch}:${activeId}:${start}:${end}` : null,
     online,
     useCallback(
       (signal) =>
@@ -65,7 +87,11 @@ export function FinanceWorkspace({
     rows: Transaction[];
     current?: Transaction;
   }>();
-  const visibleDraft = draft && draft.wallet.id === activeId ? draft : undefined;
+  const draftRevoked =
+    draft &&
+    (list.error || (list.data && !wallets.some((wallet) => wallet.id === draft.wallet.id)));
+  if (draftRevoked) setDraft(undefined);
+  const visibleDraft = draftRevoked ? undefined : draft;
   const closeDraft = () => {
     setDraft(undefined);
     requestAnimationFrame(() => opener.current?.focus());
@@ -212,6 +238,8 @@ export function FinanceWorkspace({
           wallet={visibleDraft.wallet}
           userId={userId}
           online={online}
+          authorized={visibleDraft.wallet.id === activeId}
+          accountIsCurrent={accountIsCurrent}
           client={client}
           rankedRows={visibleDraft.rows}
           close={closeDraft}

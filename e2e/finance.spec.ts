@@ -208,3 +208,130 @@ test('renames, archives and restores a category from its own card', async ({ pag
     auth.finance.categories.find((category) => category.name === 'Supermercado')?.archived_at,
   ).toBeNull();
 });
+
+test('hides a revoked wallet on focus and while reconnect checks are pending', async ({
+  page,
+  context,
+  auth,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await expect(page.getByText('Feira', { exact: true })).toBeVisible();
+  const walletPath = /\/rest\/v1\/wallet_members\?/;
+  const requested = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  await page.route(walletPath, async (route) => {
+    requested.resolve();
+    await release.promise;
+    await route.fallback();
+  });
+  try {
+    await context.setOffline(true);
+    await expect(page.getByText('Você está offline', { exact: true })).toBeVisible();
+    await context.setOffline(false);
+    await requested.promise;
+    await expect(page.getByText('Carregando carteiras…')).toBeVisible();
+    await expect(page.getByText('Feira', { exact: true })).toHaveCount(0);
+    auth.finance.wallets.splice(0, 1);
+  } finally {
+    release.resolve();
+  }
+  const wallet = page.getByRole('combobox', { name: 'Carteira ativa' });
+  await expect(wallet).toHaveText('Viagem');
+  auth.finance.wallets.splice(0, 1);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(wallet).toHaveText('Europa');
+});
+
+test('an offline transition cancels a save waiting for its duplicate lookup', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Nova transação', exact: true }).click();
+  await page.getByRole('button', { name: 'Mercado', exact: true }).click();
+  await page.getByRole('button', { name: 'Compras', exact: true }).click();
+  const requested = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let writes = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.endsWith('/save_web_transaction')) writes++;
+  });
+  await page.route(/\/rest\/v1\/transactions\?.*amount_cents=/, async (route) => {
+    requested.resolve();
+    await release.promise;
+    await route.fallback();
+  });
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await requested.promise;
+  try {
+    await context.setOffline(true);
+    await expect(page.getByRole('dialog').getByText(/Você está offline/)).toBeVisible();
+  } finally {
+    release.resolve();
+    await context.setOffline(false);
+  }
+  await expect(page.getByRole('button', { name: 'Salvar', exact: true })).toBeEnabled();
+  expect(writes).toBe(0);
+});
+
+test('a changed retry after a lost response reports the saved version', async ({ page, auth }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Nova transação', exact: true }).click();
+  await page.getByRole('button', { name: 'Mercado', exact: true }).click();
+  await page.getByRole('button', { name: 'Compras', exact: true }).click();
+  auth.finance.failures.transactionResponse = true;
+  const save = page.getByRole('button', { name: 'Salvar', exact: true });
+  await save.click();
+  await expect(page.getByText(/Seu rascunho continua aqui/)).toBeVisible();
+  await page.getByLabel('Valor').fill('4350');
+  await save.click();
+  await expect(page.getByText(/Já existe uma versão salva desta transação/)).toBeVisible();
+  await expect(page.getByLabel('Valor')).toHaveValue('4350');
+  expect(auth.finance.rows.filter((row) => row.description === 'Compras')).toHaveLength(1);
+  expect(auth.finance.rows.find((row) => row.description === 'Compras')?.amount_cents).toBe(4200);
+  await page.getByRole('button', { name: 'Voltar à lista' }).click();
+  await expect(page.getByRole('button', { name: /Mercado Compras/ })).toContainText('42,00');
+});
+
+test('sign-out in a second tab cancels a save waiting for its duplicate lookup', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Nova transação', exact: true }).click();
+  await page.getByRole('button', { name: 'Mercado', exact: true }).click();
+  await page.getByRole('button', { name: 'Compras', exact: true }).click();
+  const requested = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const processed = Promise.withResolvers<void>();
+  let writes = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.endsWith('/save_web_transaction')) writes++;
+  });
+  await page.route(/\/rest\/v1\/transactions\?.*amount_cents=/, async (route) => {
+    requested.resolve();
+    await release.promise;
+    try {
+      await route.fallback();
+    } finally {
+      processed.resolve();
+    }
+  });
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await requested.promise;
+  try {
+    const second = await context.newPage();
+    await second.goto('/');
+    await second.getByRole('button', { name: 'Carteiras' }).click();
+    await second.getByRole('button', { name: 'Sair', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
+  } finally {
+    release.resolve();
+  }
+  await processed.promise;
+  expect(writes).toBe(0);
+});
