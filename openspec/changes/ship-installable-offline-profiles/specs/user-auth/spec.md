@@ -30,6 +30,11 @@ The application SHALL show Spendspacey identity, language selection, and Google 
 - **THEN** the screen remains usable with a localized missing-field label or avatar fallback
 - **AND** user-supplied identity text is rendered as text rather than executable markup
 
+#### Scenario: Profile is missing or unavailable
+- **WHEN** the current user's online profile read is pending or fails
+- **THEN** localized status and available authentication controls remain usable
+- **AND** no other user's profile substitutes for the current user's result
+
 #### Scenario: Saved profiles are viewable without verified authentication
 - **WHEN** a prepared application has an eligible saved profile snapshot but cannot restore or refresh authentication offline
 - **THEN** it shows a clearly labeled read-only saved-profiles view and language selection

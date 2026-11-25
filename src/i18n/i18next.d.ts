@@ -1,10 +1,10 @@
 import 'i18next';
-import type { en } from './en';
+import type { ptBR } from './pt-BR';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
     defaultNS: 'translation';
-    resources: { translation: typeof en };
+    resources: { translation: typeof ptBR };
     enableSelector: true;
     strictKeyChecks: true;
   }

@@ -16,7 +16,7 @@ import { syntheticSession } from '../../test/session';
 async function setup(url = '/') {
   vi.stubGlobal('__AUTH_POLICY__', { kind: 'denied' });
   window.history.replaceState(null, '', url);
-  const instance = await initializeI18n(createInstance(), 'en');
+  const instance = await initializeI18n(createInstance());
   const mock = authMock();
   mock.auth.getSession.mockResolvedValue({ data: { session: syntheticSession() }, error: null });
   render(
@@ -33,9 +33,8 @@ async function setup(url = '/') {
 
 it('keeps preview sign-in disabled and feedback localized without restoring an identity', async () => {
   const mock = await setup();
-  expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
-  expect(screen.getByRole('alert')).toHaveTextContent('unavailable at this address');
-  await userEvent.selectOptions(screen.getByRole('combobox'), 'pt-BR');
+  expect(screen.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
+  expect(screen.getByRole('alert')).toHaveTextContent('indisponível neste endereço');
   expect(screen.getByRole('alert')).toHaveTextContent('indisponível neste endereço');
   expect(screen.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
   expect(screen.queryByText('Test Person')).not.toBeInTheDocument();
@@ -46,14 +45,14 @@ it('keeps preview sign-in disabled and feedback localized without restoring an i
 
 it('scrubs preview callback input without exchanging or replaying a code', async () => {
   const mock = await setup('/auth/callback?code=synthetic-preview-code#synthetic-fragment');
-  expect(screen.getByRole('alert')).toHaveTextContent('unavailable at this address');
+  expect(screen.getByRole('alert')).toHaveTextContent('indisponível neste endereço');
   expect(location.search + location.hash).toBe('');
   expect(await exchangeOnce(mock.client, 'synthetic-preview-code')).toEqual({
     ok: false,
     message: 'previewAuthentication',
   });
   expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
 });
 
 it('also blocks imperative authentication actions that bypass the disabled control', async () => {

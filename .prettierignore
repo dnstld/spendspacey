@@ -4,8 +4,10 @@ dist/
 coverage/
 .cache/
 public/fonts/OFL.txt
+public/fonts/Lato-OFL.txt
 test-results/
 playwright-report/
 pnpm-lock.yaml
+src/components/ui/
 .agents/
 openspec/

@@ -41,6 +41,10 @@ Use Brazilian Portuguese translations and local calendar dates for display. Use 
 - Contas's checked-in migrations may differ from production. Inspect schema and grants without reading private finance rows. Reconcile drift with the migration owner and prove a forward path using synthetic accounts.
 - The original shell has extensive worker generation and recovery tests. Timebox product-specific browser tests separately, retain the lifecycle/privacy assertions, and update locale assertions to Brazilian Portuguese. A production rollback must use the documented worker-aware procedure.
 
+## Earlier changes
+
+The archived online-profile change records the accepted behavior at revision `1549022`. Its production and installed-app evidence is in [Online profiles](../../../docs/online-profiles.md). The `offline-profiles` and `ship-installable-offline-profiles` proposals remain visible as unfinished work. This release supersedes their durable profile storage goals for the family workspace. The existing checkout keeps the separate wallet-startup-resolution proposal.
+
 ## Migration plan
 
 1. Preserve the current checkout and develop on the clean release worktree. Reconcile the already accepted online-profile closure from the local branch and the historical specs on main before final spec synchronization. Record older plans as historical or superseded without marking unexecuted tasks complete.

@@ -10,8 +10,12 @@ import { initializeI18n } from '@/i18n';
 import { authMock, deferred } from '../../test/authMock';
 import { syntheticSession } from '../../test/session';
 
-async function setup(mock = authMock(), locale: 'en' | 'pt-BR' = 'en') {
-  const instance = await initializeI18n(createInstance(), locale);
+vi.mock('@/finance/workspace', () => ({
+  FinanceWorkspace: ({ account }: { account: import('react').ReactNode }) => <>{account}</>,
+}));
+
+async function setup(mock = authMock()) {
+  const instance = await initializeI18n(createInstance());
   render(
     <I18nextProvider i18n={instance}>
       <AuthProvider client={mock.client}>
@@ -30,15 +34,15 @@ describe('authentication screen', () => {
     const read = deferred<Awaited<ReturnType<typeof mock.auth.getSession>>>();
     mock.auth.getSession.mockReturnValue(read.promise);
     await setup(mock);
-    expect(screen.getByRole('status')).toHaveTextContent('Getting your space ready');
+    expect(screen.getByRole('status')).toHaveTextContent('Preparando seu espaço');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     await act(async () => read.resolve({ data: { session: null }, error: null }));
-    expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
   });
 
   it('starts Google PKCE at the application callback and prevents repeated starts', async () => {
     const mock = await setup();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Entrar com o Google' }));
     expect(mock.auth.signInWithOAuth).toHaveBeenCalledWith({
       provider: 'google',
       options: { redirectTo: `${location.origin}/auth/callback`, scopes: 'openid email profile' },
@@ -51,8 +55,8 @@ describe('authentication screen', () => {
     const mock = authMock();
     mock.auth.signInWithOAuth.mockResolvedValueOnce({ error: { message: 'private diagnostic' } });
     await setup(mock);
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not start sign-in');
+    await userEvent.click(await screen.findByRole('button', { name: 'Entrar com o Google' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível iniciar o login');
     expect(screen.getByRole('button')).toBeEnabled();
     expect(document.body).not.toHaveTextContent('private diagnostic');
   });
@@ -62,8 +66,8 @@ describe('authentication screen', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('blocked');
     });
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('needs browser storage');
+    await userEvent.click(await screen.findByRole('button', { name: 'Entrar com o Google' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('precisa do armazenamento');
     expect(mock.auth.signInWithOAuth).not.toHaveBeenCalled();
   });
 
@@ -79,12 +83,11 @@ describe('authentication screen', () => {
     expect(await screen.findByRole('heading', { name: 'Test Person' })).toBeVisible();
     expect(screen.getByText('person@example.test')).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Spendspacey' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole('combobox'), 'pt-BR');
+    expect(screen.queryByRole('button', { name: 'Entrar com o Google' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Sair' }));
     expect(mock.auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
     expect(await screen.findByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
-    expect(localStorage.getItem('spendspacey.locale')).toBe('pt-BR');
+    expect(document.documentElement.lang).toBe('pt-BR');
   });
 
   it('retains the actual authenticated view when sign-out fails', async () => {
@@ -92,8 +95,8 @@ describe('authentication screen', () => {
     mock.auth.getSession.mockResolvedValue({ data: { session: syntheticSession() }, error: null });
     mock.auth.signOut.mockRejectedValueOnce(new Error('private diagnostic'));
     await setup(mock);
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not sign you out');
+    await userEvent.click(await screen.findByRole('button', { name: 'Sair' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível sair');
     expect(screen.getByRole('heading')).toHaveTextContent('Test Person');
     expect(screen.getByRole('button')).toBeEnabled();
   });
@@ -107,14 +110,14 @@ describe('authentication screen', () => {
     await setup(mock);
     expect(await screen.findByRole('heading', { name: 'Test Person' })).toBeVisible();
     mock.profile.maybeSingle.mockReturnValueOnce(freshProfile.promise);
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sair' }));
     expect(screen.queryByRole('heading', { name: 'Test Person' })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('img', { name: 'Test Person profile photo' }),
+      screen.queryByRole('img', { name: 'Foto do perfil de Test Person' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Signing out…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Saindo…' })).toBeDisabled();
     await act(async () => signOut.resolve({ error: { message: 'private diagnostic' } }));
-    expect(await screen.findByText('Loading your profile…')).toHaveAttribute('role', 'status');
+    expect(await screen.findByText('Carregando seu perfil…')).toHaveAttribute('role', 'status');
     expect(screen.queryByRole('heading', { name: 'Test Person' })).not.toBeInTheDocument();
     expect(mock.auth.getUser).toHaveBeenCalledTimes(2);
     expect(mock.profile.maybeSingle).toHaveBeenCalledTimes(2);
@@ -130,7 +133,7 @@ describe('authentication screen', () => {
       }),
     );
     expect(await screen.findByRole('heading', { name: 'Fresh Person' })).toBeVisible();
-    expect(screen.getByRole('alert')).toHaveTextContent('could not sign you out');
+    expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível sair');
   });
 
   it('renders metadata as text and rejects unsafe avatar URLs', async () => {
@@ -153,7 +156,7 @@ describe('authentication screen', () => {
     await setup(mock);
     expect(await screen.findByRole('heading')).toHaveTextContent('<script>synthetic()</script>');
     expect(document.querySelector('script')).toBeNull();
-    expect(await screen.findByRole('img', { name: 'Profile photo unavailable' })).toBeVisible();
+    expect(await screen.findByRole('img', { name: 'Foto de perfil indisponível' })).toBeVisible();
   });
 
   it('keeps SDK email and controls usable while the database profile loads', async () => {
@@ -162,9 +165,9 @@ describe('authentication screen', () => {
     mock.auth.getSession.mockResolvedValue({ data: { session: syntheticSession() }, error: null });
     mock.profile.maybeSingle.mockReturnValue(profile.promise);
     await setup(mock);
-    expect(await screen.findByText('Loading your profile…')).toHaveAttribute('role', 'status');
+    expect(await screen.findByText('Carregando seu perfil…')).toHaveAttribute('role', 'status');
     expect(screen.getByText('person@example.test')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Sair' })).toBeEnabled();
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     await act(async () =>
       profile.resolve({
@@ -185,7 +188,9 @@ describe('authentication screen', () => {
     mock.auth.getSession.mockResolvedValue({ data: { session: syntheticSession() }, error: null });
     mock.profile.maybeSingle.mockResolvedValueOnce({ data: null, error: null });
     await setup(mock);
-    expect(await screen.findByText('Your database profile is not available.')).toBeVisible();
+    expect(
+      await screen.findByText('Seu perfil no banco de dados não está disponível.'),
+    ).toBeVisible();
     expect(screen.getByText('person@example.test')).toBeVisible();
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
@@ -205,7 +210,7 @@ describe('authentication screen', () => {
         },
         error: null,
       });
-    await setup(mock, 'pt-BR');
+    await setup(mock);
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Não foi possível carregar seu perfil',
     );
@@ -224,9 +229,9 @@ describe('authentication screen', () => {
       error: { code: 'network' },
     });
     await setup(mock);
-    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Tentar novamente' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeVisible(),
+      expect(screen.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible(),
     );
     const session = syntheticSession();
     session.user.email = undefined;
@@ -242,7 +247,7 @@ describe('authentication screen', () => {
       error: null,
     });
     act(() => mock.emit('SIGNED_IN', session));
-    expect(await screen.findByRole('heading')).toHaveTextContent('Name unavailable');
-    expect(screen.getByText('Email unavailable')).toBeVisible();
+    expect(await screen.findByRole('heading')).toHaveTextContent('Nome indisponível');
+    expect(screen.getByText('E-mail indisponível')).toBeVisible();
   });
 });

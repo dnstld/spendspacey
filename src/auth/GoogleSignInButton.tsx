@@ -10,7 +10,7 @@ export function GoogleSignInButton() {
   const pending = auth?.pending;
   return (
     <Button
-      className="w-full border-[#747775] bg-white font-google text-[#1f1f1f]"
+      className="min-h-11 w-full gap-3 border-[#747775] bg-white font-google text-[#1f1f1f]"
       variant="outline"
       disabled={!auth || !authenticationAllowed() || !!pending}
       aria-busy={pending === 'signIn'}

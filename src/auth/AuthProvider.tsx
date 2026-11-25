@@ -52,14 +52,21 @@ export function AuthProvider({
     });
     const readRevision = revision;
     let settled = false;
+    let interrupted = navigator.onLine === false;
     const unavailable = () => {
       if (!active || settled || revision !== readRevision) return;
+      interrupted ||= navigator.onLine === false;
       setState((previous) =>
         previous.status === 'initializing' ? { ...previous, status: 'error' } : previous,
       );
       setMessage('offlineRestore');
     };
     const timer = window.setTimeout(unavailable, 8000);
+    const reconnect = () => {
+      if (!active || !interrupted || revision !== readRevision) return;
+      setAttempt((previous) => previous + 1);
+    };
+    window.addEventListener('online', reconnect);
     window.addEventListener('offline', unavailable);
     if (navigator.onLine === false) unavailable();
     void client.auth
@@ -93,6 +100,7 @@ export function AuthProvider({
     return () => {
       active = false;
       clearTimeout(timer);
+      window.removeEventListener('online', reconnect);
       window.removeEventListener('offline', unavailable);
       subscription.unsubscribe();
     };

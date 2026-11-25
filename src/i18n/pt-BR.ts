@@ -1,9 +1,6 @@
-import type { en, TranslationShape } from './en';
-
 export const ptBR = {
   common: {
     title: 'Spendspacey · Sua conta',
-    language: 'Idioma',
     retry: 'Tentar novamente',
     back: 'Voltar',
     connectionRetry: 'Testar a conexão',
@@ -46,8 +43,7 @@ export const ptBR = {
     repair: 'Abrir recuperação',
   },
   errors: {
-    offlineRestore:
-      'Conecte-se para restaurar sua sessão e tente novamente. Você ainda pode mudar o idioma.',
+    offlineRestore: 'Conecte-se para restaurar sua sessão e tente novamente.',
     offlineSignIn:
       'Conecte-se para entrar. Você pode testar a conexão; o login não começará automaticamente.',
     offlineSignOut:
@@ -69,4 +65,4 @@ export const ptBR = {
     storage:
       'O login precisa do armazenamento do navegador. Permita o armazenamento e tente novamente.',
   },
-} as const satisfies TranslationShape<typeof en>;
+} as const;

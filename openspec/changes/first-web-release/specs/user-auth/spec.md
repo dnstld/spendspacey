@@ -22,6 +22,11 @@ The application SHALL show Spendspacey identity and Google sign-in when signed o
 - **THEN** the screen remains usable with an accessible localized fallback
 - **AND** user-supplied identity text is rendered as text rather than executable markup
 
+#### Scenario: Profile is missing or unavailable
+- **WHEN** the current-user profile read is pending, missing, or fails
+- **THEN** localized profile feedback and sign-out remain usable from Carteiras
+- **AND** the finance workspace follows the established account and wallet authorization rules
+
 ### Requirement: Sign-out affects the current session
 
 Sign-out SHALL end the current authentication session without requesting sign-out of independent sessions on other devices. It SHALL report failures without claiming success.

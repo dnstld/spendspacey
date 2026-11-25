@@ -26,6 +26,7 @@ Spendspacey already delivers a hosted, installable sign-in and profile shell. Th
 ### Modified Capabilities
 
 - `localization` establishes Brazilian Portuguese as the sole app locale and defines currency-specific number formatting.
+- `user-profile` places the existing read-only own-profile card in Carteiras.
 - `user-auth` extends offline session continuity into the authenticated workspace and aligns authentication controls with the sole app locale.
 - `installable-app` aligns offline shell and new release acceptance with Brazilian Portuguese.
 - `web-delivery` aligns hosted callback acceptance with the sole app locale.

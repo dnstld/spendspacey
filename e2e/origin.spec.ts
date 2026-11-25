@@ -1,3 +1,4 @@
+import { financeFixture, isFinancePath } from './finance-data';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test, expect, type BrowserContext } from '@playwright/test';
@@ -34,6 +35,7 @@ async function serveArtifact(context: BrowserContext, origin: string, kind = 'pr
   const authRequests: string[] = [];
   const sdkRequests: string[] = [];
   const unexpected: string[] = [];
+  const finance = financeFixture();
   let exchanges = 0;
   await context.route('**/*', async (route) => {
     const url = new URL(route.request().url());
@@ -74,6 +76,7 @@ async function serveArtifact(context: BrowserContext, origin: string, kind = 'pr
       }
       if (url.pathname === '/auth/v1/logout') return route.fulfill({ status: 204 });
       if (url.pathname === '/auth/v1/user') return route.fulfill({ json: syntheticSession().user });
+      if (isFinancePath(url.pathname)) return finance.handle(route);
       if (url.pathname === '/rest/v1/profiles') {
         expect(route.request().method()).toBe('GET');
         expect(url.searchParams.get('select')).toBe('id,display_name,avatar_url,updated_at');
@@ -104,14 +107,16 @@ test('the production artifact authenticates, restores and signs out only on its 
 }) => {
   const calls = await serveArtifact(context, canonical);
   await page.goto(canonical);
-  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
   await expect(page).toHaveURL(`${canonical}/`);
   await page.reload();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
-  await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Sair' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeEnabled();
   expect(calls.exchanges()).toBe(1);
   expect(calls.sdkRequests.length).toBeGreaterThan(0);
   expect(calls.unexpected).toEqual([]);
@@ -150,11 +155,11 @@ for (const [kind, origin] of [
       { ...syntheticSession(), expires_at: 1 },
     );
     await page.goto(origin);
-    await expect(page.getByRole('alert')).toContainText('unavailable at this address');
-    await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+    await expect(page.getByRole('alert')).toContainText('indisponível neste endereço');
+    await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
     await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
     for (const path of callbackPaths) {
       for (const input of callbackInputs) {
         // Start from another path so a fragment-only case is a fresh callback
@@ -162,7 +167,7 @@ for (const [kind, origin] of [
         await page.goto(origin);
         await page.goto(`${origin}${path}${input}`);
         await expect(page).toHaveURL(`${origin}${callbackRoute.path}`);
-        await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+        await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
         const entry = await page.evaluate(() => ({
           actual: { state: history.state, length: history.length },
           before: JSON.parse(sessionStorage.getItem('synthetic-history-before-bootstrap')!),
@@ -175,15 +180,14 @@ for (const [kind, origin] of [
       // Unknown native Pages HTML is not an owned application document. With a
       // controller its unbound assets fail closed; it must never borrow selection.
       await page.goto(origin);
-      await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
       await page.goto(url);
       if (await page.evaluate(() => !!navigator.serviceWorker.controller))
-        await expect(page.getByRole('button', { name: 'Sign in with Google' })).toHaveCount(0);
-      else await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeDisabled();
+        await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toHaveCount(0);
+      else await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeDisabled();
       expect(page.url()).toBe(url);
     }
     await page.goto(origin);
-    await page.getByRole('combobox').selectOption('pt-BR');
     await expect(page.getByRole('alert')).toContainText('indisponível neste endereço');
     expect(calls.authRequests).toEqual([]);
     // All SDK construction lives in this lazy module; denied pages never import it.

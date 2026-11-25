@@ -4,7 +4,7 @@ import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import App from '@/App';
 import { initializeI18n } from '@/i18n';
 import { authMock, deferred } from '../../test/authMock';
@@ -12,9 +12,13 @@ import { syntheticSession } from '../../test/session';
 import { callbackRoute } from '@/lib/callbackRoute';
 import { callbackPaths } from '../../test/callbackPaths';
 
+vi.mock('@/finance/workspace', () => ({
+  FinanceWorkspace: ({ account }: { account: import('react').ReactNode }) => <>{account}</>,
+}));
+
 async function setup(url: string, mock = authMock()) {
   window.history.replaceState({ sentinel: 'preserve callback entry' }, '', url);
-  const instance = await initializeI18n(createInstance(), 'en');
+  const instance = await initializeI18n(createInstance());
   render(
     <StrictMode>
       <I18nextProvider i18n={instance}>
@@ -43,7 +47,7 @@ describe('OAuth callback', () => {
         'synthetic-captured-code',
       );
       await act(async () => exchange.resolve({ data: { session: null }, error: null }));
-      expect(await screen.findByRole('alert')).toHaveTextContent('unavailable or has expired');
+      expect(await screen.findByRole('alert')).toHaveTextContent('indisponível ou expirou');
       expect(mock.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
     },
   );
@@ -52,7 +56,7 @@ describe('OAuth callback', () => {
     'captures a provider fragment before canonicalizing %s without exchange',
     async (path) => {
       const mock = await setup(`${path}?error_description=synthetic-private#error=access_denied`);
-      expect(await screen.findByRole('alert')).toHaveTextContent('cancelled');
+      expect(await screen.findByRole('alert')).toHaveTextContent('cancelado');
       expect(location.pathname + location.search + location.hash).toBe(callbackRoute.path);
       expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
       expect(document.body).not.toHaveTextContent('synthetic-private');
@@ -66,7 +70,7 @@ describe('OAuth callback', () => {
     const exchange = deferred<Awaited<ReturnType<typeof mock.auth.exchangeCodeForSession>>>();
     mock.auth.exchangeCodeForSession.mockReturnValue(exchange.promise);
     await setup('/auth/callback?code=synthetic-code', mock);
-    expect(screen.getByRole('status')).toHaveTextContent('Completing sign-in');
+    expect(screen.getByRole('status')).toHaveTextContent('Concluindo o login');
     expect(location.search).toBe('');
     const session = syntheticSession();
     await act(async () => {
@@ -80,19 +84,16 @@ describe('OAuth callback', () => {
   });
 
   it.each([
-    ['/auth/callback', 'unavailable or has expired'],
-    ['/auth/callback?error=access_denied&error_description=private-diagnostic', 'cancelled'],
-    ['/auth/callback#error=access_denied&error_description=private-diagnostic', 'cancelled'],
-    ['/auth/callback?error_code=signup_disabled', 'This account cannot sign in'],
-    ['/auth/callback#error_code=signup_disabled', 'This account cannot sign in'],
-    [
-      '/auth/callback?error=unknown&error_description=private-diagnostic',
-      'could not complete sign-in',
-    ],
+    ['/auth/callback', 'indisponível ou expirou'],
+    ['/auth/callback?error=access_denied&error_description=private-diagnostic', 'cancelado'],
+    ['/auth/callback#error=access_denied&error_description=private-diagnostic', 'cancelado'],
+    ['/auth/callback?error_code=signup_disabled', 'Esta conta não pode entrar'],
+    ['/auth/callback#error_code=signup_disabled', 'Esta conta não pode entrar'],
+    ['/auth/callback?error=unknown&error_description=private-diagnostic', 'concluir o login'],
   ])('handles provider or missing-code recovery: %s', async (url, message) => {
     const mock = await setup(url);
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
-    expect(screen.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Entrar com o Google' })).toBeEnabled();
     expect(location.search + location.hash).toBe('');
     expect(document.body).not.toHaveTextContent('private-diagnostic');
     expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
@@ -133,8 +134,8 @@ describe('OAuth callback', () => {
     const mock = authMock();
     mock.auth.exchangeCodeForSession.mockRejectedValue(new Error('network'));
     await setup('/auth/callback?code=synthetic-network-code', mock);
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not complete sign-in');
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in with Google' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('concluir o login');
+    await userEvent.click(screen.getByRole('button', { name: 'Entrar com o Google' }));
     expect(mock.auth.signInWithOAuth).toHaveBeenCalledOnce();
     expect(mock.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
   });
@@ -143,7 +144,7 @@ describe('OAuth callback', () => {
     const mock = authMock();
     mock.auth.getSession.mockResolvedValue({ data: { session: syntheticSession() }, error: null });
     await setup('/auth/callback?error=access_denied', mock);
-    await userEvent.click(screen.getByRole('link', { name: 'Back' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Voltar' }));
     expect(await screen.findByRole('heading')).toHaveTextContent('Test Person');
     expect(mock.auth.signOut).not.toHaveBeenCalled();
   });
@@ -151,7 +152,7 @@ describe('OAuth callback', () => {
   it('does not invent a session for an empty successful exchange', async () => {
     const mock = await setup('/auth/callback?code=synthetic-empty-code');
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('unavailable or has expired'),
+      expect(screen.getByRole('alert')).toHaveTextContent('indisponível ou expirou'),
     );
     expect(mock.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
   });

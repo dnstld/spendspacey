@@ -1,6 +1,6 @@
-import type { en } from '@/i18n/en';
+import type { ptBR } from '@/i18n/pt-BR';
 
-export type AuthMessage = keyof typeof en.errors;
+export type AuthMessage = keyof typeof ptBR.errors;
 
 export class AuthStorageError extends Error {}
 

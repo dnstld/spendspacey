@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 import { test, expect, type Page, type BrowserContext, type CDPSession } from '@playwright/test';
+import { financeFixture, isFinancePath } from './finance-data';
 import { pwaServer } from './pwa-server';
 import { syntheticSession } from '../test/session';
 import { SYNTHETIC_ENV } from '../test/config';
@@ -42,14 +43,20 @@ async function setOffline(context: BrowserContext, offline: boolean) {
 async function prepared(page: Page, origin: string) {
   await disableHttpCache(page);
   await page.goto(origin);
-  await expect(page.getByTestId('offline-readiness')).toContainText('Prepared for offline', {
-    timeout: 20000,
-  });
+  await expect(page.getByTestId('offline-readiness')).toContainText(
+    /Prepared for offline|Preparado para uso offline/,
+    {
+      timeout: 20000,
+    },
+  );
   expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(false);
   await page.reload();
-  await expect(page.getByTestId('offline-readiness')).toContainText('ready for offline', {
-    timeout: 20000,
-  });
+  await expect(page.getByTestId('offline-readiness')).toContainText(
+    /ready for offline|pronta para uso offline/,
+    {
+      timeout: 20000,
+    },
+  );
   expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
 }
 async function inventory(page: Page) {
@@ -74,23 +81,27 @@ async function inventory(page: Page) {
   });
 }
 
+function saveLegacyLocale(page: Page, value: string) {
+  return page.evaluate((locale) => localStorage.setItem('spendspacey.locale', locale), value);
+}
+
 for (const locale of ['en', 'pt-BR'])
   test(`prepared offline hard reload and new page: ${locale}`, async ({ page, context }) => {
     const host = await pwaServer();
     try {
       await prepared(page, host.origin);
-      await page.getByRole('combobox').selectOption(locale);
+      await saveLegacyLocale(page, locale);
       await setOffline(context, true);
       await page.reload();
       await expect(page.getByRole('heading', { name: 'Spendspacey' })).toBeVisible();
-      await expect(page.locator('html')).toHaveAttribute('lang', locale);
+      await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
       const second = await context.newPage();
       await disableHttpCache(second, true);
       await second.goto(host.origin);
 
       await expect(second.getByRole('heading', { name: 'Spendspacey' })).toBeVisible();
-      await expect(second.getByRole('combobox')).toHaveValue(locale);
-      await second.getByRole('combobox').selectOption(locale === 'en' ? 'pt-BR' : 'en');
+      await expect(second.locator('html')).toHaveAttribute('lang', 'pt-BR');
+      await saveLegacyLocale(second, locale === 'en' ? 'pt-BR' : 'en');
       await second.getByRole('button', { name: /Sign in with Google|Entrar com o Google/ }).click();
       await expect(second.getByRole('alert')).toContainText(
         /Connect to sign in|Conecte-se para entrar/,
@@ -156,8 +167,12 @@ test('manifest diagnostics, standalone metadata and no service-worker support fa
       }, feature);
       const online = await unsupported.newPage();
       await online.goto(host.origin);
-      await expect(online.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
-      await expect(online.getByTestId('offline-readiness')).toContainText('unavailable');
+      await expect(
+        online.getByRole('button', { name: /^(Sign in with Google|Entrar com o Google)$/ }),
+      ).toBeEnabled();
+      await expect(online.getByTestId('offline-readiness')).toContainText(
+        /unavailable|não está garantido/,
+      );
       await unsupported.close();
     }
   } finally {
@@ -208,12 +223,16 @@ test('Auth, OAuth, token, API, avatars and arbitrary static queries bypass every
     );
     await page.goto('https://accounts.google.com/o/oauth2/v2/auth?code=synthetic-private-marker');
     await page.goto(host.origin);
-    await page.getByRole('button', { name: 'Sign in with Google' }).click();
+    await page.getByRole('button', { name: /^(Sign in with Google|Entrar com o Google)$/ }).click();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
     await page.reload();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
+    await page.getByRole('button', { name: 'Sair', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: /^(Sign in with Google|Entrar com o Google)$/ }),
+    ).toBeVisible();
     const main = before.find(({ url }) => /assets\/index-.*\.js/.test(url))!;
     const routed = await page.evaluate(async (main) => {
       const results = [];
@@ -237,7 +256,7 @@ test('Auth, OAuth, token, API, avatars and arbitrary static queries bypass every
     );
     expect(callback?.headers()['cache-control']).toBe('no-store');
     expect(callback?.headers()['referrer-policy']).toBe('no-referrer');
-    await expect(page.getByRole('alert')).toContainText('could not finish offline');
+    await expect(page.getByRole('alert')).toContainText('concluir este login offline');
     await expect(page).toHaveURL(`${host.origin}/auth/callback`);
     const after = await inventory(page);
     expect(
@@ -270,11 +289,12 @@ test('Auth, OAuth, token, API, avatars and arbitrary static queries bypass every
   }
 });
 
-test('the production worker never persists the online current-user profile', async ({
+test('the production worker never persists the online current-user profile or finance records', async ({
   page,
   context,
 }) => {
   const host = await pwaServer();
+  const finance = financeFixture();
   let networkAvailable = true;
   let profileReads = 0;
   try {
@@ -305,14 +325,18 @@ test('the production worker never persists the online current-user profile', asy
           ],
         });
       }
+      if (isFinancePath(url.pathname)) return finance.handle(route);
       return route.abort();
     });
     await prepared(page, host.origin);
-    await page.getByRole('button', { name: 'Sign in with Google' }).click();
-    await expect(page.getByRole('region', { name: 'Your profile' })).toHaveCount(1);
+    await page.getByRole('button', { name: /^(Sign in with Google|Entrar com o Google)$/ }).click();
+    await expect(page.getByText('Feira', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Seu perfil' })).toHaveCount(1);
     await expect(page.getByRole('heading', { name: 'Database Profile' })).toHaveCount(1);
     expect(profileReads).toBe(1);
     await page.reload();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Database Profile' })).toHaveCount(1);
     expect(profileReads).toBe(2);
 
@@ -325,28 +349,34 @@ test('the production worker never persists the online current-user profile', asy
       databases: (await indexedDB.databases()).map(({ name }) => name),
     }));
     expect(JSON.stringify(persistence.local)).not.toContain('Database Profile');
+    expect(JSON.stringify(persistence.local)).not.toContain('Feira');
     expect(persistence.databases).toEqual([]);
     const beforeOffline = await inventory(page);
-    expect(beforeOffline.some(({ url }) => /\/rest\/v1\/profiles/.test(url))).toBe(false);
-    expect(beforeOffline.some(({ body }) => body.includes('Database Profile'))).toBe(false);
+    expect(beforeOffline.some(({ url }) => /\/rest\/v1\//.test(url))).toBe(false);
+    expect(beforeOffline.some(({ body }) => /Database Profile|Feira/.test(body))).toBe(false);
 
     networkAvailable = false;
     await setOffline(context, true);
     await page.reload();
-    await expect(page.getByRole('alert')).toContainText('Connect to load your profile');
+    await expect(
+      page
+        .getByRole('main', { name: 'Transações' })
+        .getByText('Você está offline', { exact: true }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Database Profile' })).toHaveCount(0);
     await expect(page.getByText('person@example.test')).toBeVisible();
     expect(profileReads).toBe(2);
     const offlineInventory = await inventory(page);
-    expect(offlineInventory.some(({ url }) => /\/rest\/v1\/profiles/.test(url))).toBe(false);
-    expect(offlineInventory.some(({ body }) => body.includes('Database Profile'))).toBe(false);
+    expect(offlineInventory.some(({ url }) => /\/rest\/v1\//.test(url))).toBe(false);
+    expect(offlineInventory.some(({ body }) => /Database Profile|Feira/.test(body))).toBe(false);
   } finally {
     await setOffline(context, false);
     await host.close();
   }
 });
 
-test('expired SDK session offline never blocks language controls or invents sign-out', async ({
+test('expired SDK session offline retains the SDK session and provides reconnect guidance', async ({
   page,
   context,
 }) => {
@@ -373,8 +403,10 @@ test('expired SDK session offline never blocks language controls or invents sign
       }),
     ).toBe(true);
     await page.reload();
-    await expect(page.getByRole('alert')).toContainText('Connect to restore', { timeout: 12_000 });
-    await page.getByRole('combobox').selectOption('pt-BR');
+    await expect(page.getByRole('alert')).toContainText('Conecte-se para restaurar', {
+      timeout: 12_000,
+    });
+    await saveLegacyLocale(page, 'pt-BR');
     await expect(page.getByRole('alert')).toContainText('Conecte-se');
     await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toHaveCount(0);
     expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBeTruthy();
@@ -554,9 +586,12 @@ test('one online preparation persists canonical / and the next ordinary load is 
   try {
     await disableHttpCache(page);
     await page.goto(host.origin);
-    await expect(page.getByTestId('offline-readiness')).toContainText('Prepared for offline', {
-      timeout: 20000,
-    });
+    await expect(page.getByTestId('offline-readiness')).toContainText(
+      /Prepared for offline|Preparado para uso offline/,
+      {
+        timeout: 20000,
+      },
+    );
     expect(host.state.requests).not.toContain('/index.html');
     expect(await page.evaluate(() => navigator.serviceWorker.controller)).toBeNull();
     const redirect = await context.request.get(host.origin + '/index.html?synthetic=1', {
@@ -566,7 +601,9 @@ test('one online preparation persists canonical / and the next ordinary load is 
     expect(redirect.headers().location).toBe('/?synthetic=1');
     await setOffline(context, true);
     await page.reload();
-    await expect(page.getByTestId('offline-readiness')).toContainText('ready for offline');
+    await expect(page.getByTestId('offline-readiness')).toContainText(
+      /ready for offline|pronta para uso offline/,
+    );
     expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
     await expect(page.getByRole('heading', { name: 'Spendspacey' })).toBeVisible();
     await expect(page.goto(host.origin + '/index.html')).rejects.toThrow();
@@ -634,14 +671,18 @@ for (const corruption of ['missing', 'bytes'])
       await setOffline(context, true);
       const fresh = await reopen(context, host.origin);
       await expect(fresh.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
-      await expect(fresh.getByTestId('offline-readiness')).toContainText('ready for offline');
+      await expect(fresh.getByTestId('offline-readiness')).toContainText(
+        /ready for offline|pronta para uso offline/,
+      );
       expect((await selection(fresh)).head.body.selected).toBe(first.head.body.selected);
       const cdp = await context.newCDPSession(fresh);
       await cdp.send('ServiceWorker.enable');
       await cdp.send('ServiceWorker.stopAllWorkers');
       await fresh.reload();
       await expect(fresh.locator('html')).toHaveAttribute('data-synthetic-version', 'v1');
-      await expect(fresh.getByTestId('offline-readiness')).toContainText('ready for offline');
+      await expect(fresh.getByTestId('offline-readiness')).toContainText(
+        /ready for offline|pronta para uso offline/,
+      );
       expect((await message(fresh, 'STATUS')).ready).toBe(true);
     } finally {
       await setOffline(context, false);
@@ -733,7 +774,7 @@ for (const locale of ['en', 'pt-BR'])
     const host = await pwaServer();
     try {
       await prepared(page, host.origin);
-      await page.getByRole('combobox').selectOption(locale);
+      await saveLegacyLocale(page, locale);
       const old = await context.newPage();
       await old.goto(host.origin);
       await expect(old.getByTestId('offline-readiness')).toContainText(/ready|pronta/);
@@ -801,9 +842,11 @@ for (const online of [true, false])
       const fresh = await context.newPage();
       await disableHttpCache(fresh, !online);
       await fresh.goto(host.origin);
-      await expect(fresh.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+      await expect(
+        fresh.getByRole('heading', { name: /^(Spendspacey recovery|Recuperação do Spendspacey)$/ }),
+      ).toBeVisible();
       await expect(fresh.getByRole('status')).toContainText(
-        online ? 'Choose Repair online' : 'You appear to be offline',
+        online ? 'Escolha Reparar com conexão' : 'Você parece estar sem conexão',
       );
       expect((await message(fresh, 'STATUS')).authority).toBe('recovery');
     } finally {
@@ -820,7 +863,11 @@ for (const path of ['/', 'bootstrap'])
         await damageSelected(page, path, kind);
         await setOffline(context, true);
         await page.reload();
-        await expect(page.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+        await expect(
+          page.getByRole('heading', {
+            name: /^(Spendspacey recovery|Recuperação do Spendspacey)$/,
+          }),
+        ).toBeVisible();
       } finally {
         await setOffline(context, false);
         await host.close();
@@ -845,12 +892,22 @@ test('failed, timed-out and cancelled recovery preserves files and duplicate att
     expect(host.state.requests.length).toBe(count);
     host.state.redirectPath = '';
     host.state.delayPath = sdk;
-    await page.getByRole('button', { name: 'Repair online', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('deadline', { timeout: 20000 });
-    await page.getByRole('button', { name: 'Repair online', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Cancel repair', exact: true })).toBeEnabled();
-    await page.getByRole('button', { name: 'Cancel repair', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('cancelled');
+    await page
+      .getByRole('button', { name: /^(Repair online|Reparar com conexão)$/, exact: true })
+      .click();
+    await expect(page.getByRole('status')).toContainText(/deadline|atingiu o prazo/, {
+      timeout: 20000,
+    });
+    await page
+      .getByRole('button', { name: /^(Repair online|Reparar com conexão)$/, exact: true })
+      .click();
+    await expect(
+      page.getByRole('button', { name: /^(Cancel repair|Cancelar reparo)$/, exact: true }),
+    ).toBeEnabled();
+    await page
+      .getByRole('button', { name: /^(Cancel repair|Cancelar reparo)$/, exact: true })
+      .click();
+    await expect(page.getByRole('status')).toContainText(/cancelled|foi cancelado/);
     expect((await selection(page)).head.body.selected).toBe(original);
   } finally {
     await setOffline(context, false);
@@ -875,8 +932,9 @@ test('recovery enforces exact CSP and handles denied locale storage without exec
     const calls: string[] = [];
     context.on('request', (r) => calls.push(r.url()));
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
-    await page.getByRole('combobox').selectOption('pt-BR');
+    await expect(
+      page.getByRole('heading', { name: /^(Spendspacey recovery|Recuperação do Spendspacey)$/ }),
+    ).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Recuperação do Spendspacey' })).toBeVisible();
     expect(
       await page.evaluate(() => {
@@ -957,20 +1015,23 @@ test('offline logout preserves the session; actual SDK failure follows cleared l
       syntheticSession(),
     );
     await page.reload();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
     await setOffline(context, true);
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await expect(page.getByRole('alert')).toContainText('Connect to sign out');
+    await page.getByRole('button', { name: 'Sair', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('Conecte-se para sair');
     expect(logoutRequests).toBe(0);
     await setOffline(context, false);
     expect(logoutRequests).toBe(0);
-    await page.getByRole('button', { name: 'Try the connection' }).click();
-    await expect(page.getByRole('alert')).toContainText('could not sign you out');
-    await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Testar a conexão' }).click();
+    await expect(page.getByRole('alert')).toContainText('Não foi possível sair');
+    await expect(
+      page.getByRole('button', { name: /^(Sign in with Google|Entrar com o Google)$/ }),
+    ).toBeEnabled();
     expect(await page.evaluate(() => localStorage.getItem('sb-auth-auth-token'))).toBeNull();
-    await expect(page.getByRole('alert')).toContainText('Your local session may have ended');
+    await expect(page.getByRole('alert')).toContainText('Sua sessão local pode ter sido encerrada');
     expect(logoutRequests).toBe(1);
-    await page.getByRole('combobox').selectOption('pt-BR');
+    await saveLegacyLocale(page, 'pt-BR');
     await expect(page.getByRole('alert')).toContainText('Não foi possível sair');
     await expect(page.getByRole('main')).not.toContainText('synthetic-private-marker');
   } finally {
@@ -1130,17 +1191,24 @@ for (const mode of [
       const recovery = await context.newPage();
       const response = await recovery.goto(host.origin);
       expect(response!.fromServiceWorker()).toBe(true);
-      await expect(recovery.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+      await expect(
+        recovery.getByRole('heading', {
+          name: /^(Spendspacey recovery|Recuperação do Spendspacey)$/,
+        }),
+      ).toBeVisible();
       await expect(recovery.getByRole('status')).toContainText(
         mode === 'stranded old implementation'
           ? 'no verified document binding'
-          : 'does not establish missing or corrupt files',
+          : 'Isso não comprova arquivos ausentes ou corrompidos',
       );
       await expect(
-        recovery.getByRole('button', { name: 'Repair online', exact: true }),
+        recovery.getByRole('button', {
+          name: /^(Repair online|Reparar com conexão)$/,
+          exact: true,
+        }),
       ).toBeDisabled();
       await expect(
-        recovery.getByRole('button', { name: 'Cancel repair', exact: true }),
+        recovery.getByRole('button', { name: /^(Cancel repair|Cancelar reparo)$/, exact: true }),
       ).toBeDisabled();
       const unbound = await message(recovery, 'STATUS');
       expect(unbound).toMatchObject({
@@ -1165,7 +1233,10 @@ for (const mode of [
           .toBe(true);
         await probe.close();
         await expect(
-          recovery.getByRole('button', { name: 'Repair online', exact: true }),
+          recovery.getByRole('button', {
+            name: /^(Repair online|Reparar com conexão)$/,
+            exact: true,
+          }),
         ).toBeDisabled();
       }
       await recovery.close();
@@ -1193,17 +1264,19 @@ for (const mode of [
       await disableHttpCache(cold);
       await cold.goto(host.origin);
       await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
-      await expect(cold.getByTestId('offline-readiness')).toContainText('ready for offline');
+      await expect(cold.getByTestId('offline-readiness')).toContainText(
+        /ready for offline|pronta para uso offline/,
+      );
       expect((await message(cold, 'STATUS')).ready).toBe(true);
       const ledger = await records(cold);
       expect(ledger.filter((r) => r.body.kind === 'activate')).toHaveLength(2);
       expect(ledger.some((r) => r.id === pin)).toBe(true);
       expect(ledger.some((r) => r.body.kind === 'attempt' || r.body.kind === 'seal')).toBe(false);
       for (const locale of ['en', 'pt-BR']) {
-        await cold.getByRole('combobox').selectOption(locale);
+        await saveLegacyLocale(cold, locale);
         await setOffline(context, true);
         await cold.reload();
-        await expect(cold.locator('html')).toHaveAttribute('lang', locale);
+        await expect(cold.locator('html')).toHaveAttribute('lang', 'pt-BR');
         await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
         await setOffline(context, false);
       }
@@ -1254,7 +1327,7 @@ for (const locale of ['en', 'pt-BR'])
       try {
         host.state.directory = '.cache/installable-offline-shell/v1';
         await prepared(page, host.origin);
-        await page.getByRole('combobox').selectOption(locale);
+        await saveLegacyLocale(page, locale);
         const predecessor = await message(page, 'STATUS');
         host.state.directory = '.cache/installable-offline-shell/baseline-611994f';
         host.state.workerPrefix = interruptedActivation;
@@ -1317,15 +1390,16 @@ for (const locale of ['en', 'pt-BR'])
           if (frame === working.mainFrame()) navigations++;
         });
         const next = locale === 'en' ? 'pt-BR' : 'en';
-        await working.getByRole('combobox').selectOption(next);
-        await expect(working.locator('html')).toHaveAttribute('lang', next);
+        if (fixed) await saveLegacyLocale(working, next);
+        else await working.getByRole('combobox').selectOption(next);
+        await expect(working.locator('html')).toHaveAttribute('lang', fixed ? 'pt-BR' : next);
         expect(navigations).toBe(0);
         await working.close();
         await stopWorkers(context);
         const cold = await context.newPage();
         await disableHttpCache(cold);
         await cold.goto(host.origin);
-        await expect(cold.locator('html')).toHaveAttribute('lang', next);
+        await expect(cold.locator('html')).toHaveAttribute('lang', fixed ? 'pt-BR' : next);
         if (fixed) {
           await expect(
             cold.getByRole('heading', { name: 'Spendspacey', exact: true }),
@@ -1370,7 +1444,7 @@ for (const locale of ['en', 'pt-BR']) {
     const host = await pwaServer();
     try {
       await prepared(page, host.origin);
-      await page.getByRole('combobox').selectOption(locale);
+      await saveLegacyLocale(page, locale);
       const committed = await message(page, 'STATUS');
       expect(
         await page.evaluate(async () =>
@@ -1393,7 +1467,7 @@ for (const locale of ['en', 'pt-BR']) {
       await expect(cold.getByTestId('offline-readiness')).toContainText(
         /ready for offline|pronta para uso offline/,
       );
-      await expect(cold.locator('html')).toHaveAttribute('lang', locale);
+      await expect(cold.locator('html')).toHaveAttribute('lang', 'pt-BR');
       const restored = await message(cold, 'STATUS');
       expect(restored.epoch).toBe(committed.epoch);
       expect(restored.generation).toBe(committed.generation);
@@ -1467,7 +1541,7 @@ for (const termination of ['graceful', 'abrupt'] as const) {
         expect(
           ledger.some((record) => record.body.kind === 'attempt' || record.body.kind === 'seal'),
         ).toBe(false);
-        await page.getByRole('combobox').selectOption(round % 2 ? 'en' : 'pt-BR');
+        await saveLegacyLocale(page, round % 2 ? 'en' : 'pt-BR');
         if (termination === 'abrupt') {
           // This PID belongs only to the exec'd browser created by this temporary launcher.
           const pid = Number(await readFile(pidFile, 'utf8'));
@@ -1555,7 +1629,7 @@ for (const locale of ['en', 'pt-BR'])
       try {
         host.state.directory = '.cache/installable-offline-shell/v1';
         await prepared(page, host.origin);
-        await page.getByRole('combobox').selectOption(locale);
+        await saveLegacyLocale(page, locale);
         const pin = (await message(page, 'STATUS')).binding;
         host.state.directory = fixed
           ? '.cache/installable-offline-shell/v2'
@@ -1647,7 +1721,7 @@ for (const locale of ['en', 'pt-BR'])
             epoch,
             generation: candidate.id,
           });
-          await expect(cold.getByRole('combobox')).toHaveValue(locale);
+          await expect(cold.locator('html')).toHaveAttribute('lang', 'pt-BR');
           await setOffline(context, true);
           await cold.close();
           await stopWorkers(context);
@@ -1655,7 +1729,7 @@ for (const locale of ['en', 'pt-BR'])
           await disableHttpCache(cold, true);
           await cold.goto(host.origin);
           await expect(cold.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
-          await expect(cold.getByRole('combobox')).toHaveValue(locale);
+          await expect(cold.locator('html')).toHaveAttribute('lang', 'pt-BR');
           expect(await message(cold, 'STATUS')).toMatchObject({
             authority: 'application',
             ready: true,
@@ -1708,14 +1782,18 @@ for (const point of ['beforePut', 'afterPut', 'readback'])
           ready: true,
         });
       } else {
-        await expect(cold.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+        await expect(
+          cold.getByRole('heading', {
+            name: /^(Spendspacey recovery|Recuperação do Spendspacey)$/,
+          }),
+        ).toBeVisible();
         expect(await message(cold, 'STATUS')).toMatchObject({
           authority: 'none',
           binding: null,
           ready: false,
         });
         await expect(
-          cold.getByRole('button', { name: 'Repair online', exact: true }),
+          cold.getByRole('button', { name: /^(Repair online|Reparar com conexão)$/, exact: true }),
         ).toBeDisabled();
         const requests = host.state.requests.length;
         await cold.waitForTimeout(150);
@@ -1767,7 +1845,9 @@ test('completion-first uniqueness does not override a newer incomplete reservati
     const cold = await context.newPage();
     await disableHttpCache(cold);
     expect((await cold.goto(host.origin))!.fromServiceWorker()).toBe(true);
-    await expect(cold.getByRole('heading', { name: 'Spendspacey recovery' })).toBeVisible();
+    await expect(
+      cold.getByRole('heading', { name: /^(Spendspacey recovery|Recuperação do Spendspacey)$/ }),
+    ).toBeVisible();
     expect(await message(cold, 'STATUS')).toMatchObject({
       authority: 'none',
       binding: null,
@@ -1799,7 +1879,7 @@ for (const termination of ['graceful', 'abrupt'])
       host.state.directory = '.cache/installable-offline-shell/v1';
       let page = await context.newPage();
       await prepared(page, host.origin);
-      await page.getByRole('combobox').selectOption('pt-BR');
+      await saveLegacyLocale(page, 'pt-BR');
       // Establish locale on disk through a prior normal lifetime. SIGKILL is
       // testing worker/ledger durability, not Chromium's deferred preference flush.
       if (termination === 'abrupt') {
@@ -1808,7 +1888,7 @@ for (const termination of ['graceful', 'abrupt'])
         guard(context);
         page = await context.newPage();
         await page.goto(host.origin);
-        await expect(page.getByRole('combobox')).toHaveValue('pt-BR');
+        await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
       }
       const pin = (await message(page, 'STATUS')).binding;
       host.state.directory = '.cache/installable-offline-shell/v2';
@@ -1836,7 +1916,7 @@ for (const termination of ['graceful', 'abrupt'])
       await disableHttpCache(page);
       await page.goto(host.origin);
       await expect(page.locator('html')).toHaveAttribute('data-synthetic-version', 'v2');
-      await expect(page.getByRole('combobox')).toHaveValue('pt-BR');
+      await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
       const status = await message(page, 'STATUS');
       expect(status).toMatchObject({ authority: 'application', ready: true });
       expect((await records(page)).some((r) => r.id === pin)).toBe(true);
@@ -1863,3 +1943,38 @@ for (const termination of ['graceful', 'abrupt'])
       await rm(profile, { recursive: true, force: true });
     }
   });
+
+test('the deployed profile-shell predecessor upgrades to finance and can roll back', async ({
+  page,
+  context,
+}) => {
+  const host = await pwaServer();
+  const predecessor = '.cache/installable-offline-shell/before-finance-1549022';
+  try {
+    host.state.directory = predecessor;
+    let active = page;
+    await prepared(active, host.origin);
+    await saveLegacyLocale(active, 'en');
+    await expect(active.locator('html')).toHaveAttribute(
+      'data-synthetic-version',
+      'before-finance-1549022',
+    );
+
+    for (const [directory, marker, language] of [
+      ['.cache/installable-offline-shell/v2', 'v2', 'pt-BR'],
+      [predecessor, 'before-finance-1549022', 'en'],
+    ]) {
+      host.state.directory = directory;
+      expect(await updateOutcome(active)).toBe('installed');
+      await active.close();
+      active = await context.newPage();
+      await disableHttpCache(active);
+      await active.goto(host.origin);
+      await expect(active.locator('html')).toHaveAttribute('data-synthetic-version', marker);
+      await expect(active.locator('html')).toHaveAttribute('lang', language);
+      await expect.poll(async () => (await message(active, 'STATUS')).ready).toBe(true);
+    }
+  } finally {
+    await host.close();
+  }
+});

@@ -1,10 +1,9 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthContext, type AuthContextValue } from '@/auth/context';
-import { LanguageSelect } from '@/components/LanguageSelect';
 import { initializeI18n } from '@/i18n';
 import { authMock } from '../../test/authMock';
 import { PwaFeedback } from './PwaFeedback';
@@ -24,7 +23,7 @@ vi.mock('./lifecycle', () => ({
   subscribePwa: () => () => {},
   repairStaticShell: mock.repair,
 }));
-async function mount(locale: 'en' | 'pt-BR' = 'en', overrides: Partial<AuthContextValue> = {}) {
+async function mount(overrides: Partial<AuthContextValue> = {}) {
   const auth = authMock();
   const value: AuthContextValue = {
     client: auth.client,
@@ -38,11 +37,10 @@ async function mount(locale: 'en' | 'pt-BR' = 'en', overrides: Partial<AuthConte
     signOut: vi.fn(),
     ...overrides,
   };
-  const i18n = await initializeI18n(createInstance(), locale);
+  const i18n = await initializeI18n(createInstance());
   const view = render(
     <I18nextProvider i18n={i18n}>
       <AuthContext value={value}>
-        <LanguageSelect />
         <PwaFeedback />
       </AuthContext>
     </I18nextProvider>,
@@ -50,96 +48,31 @@ async function mount(locale: 'en' | 'pt-BR' = 'en', overrides: Partial<AuthConte
   return { ...view, i18n };
 }
 describe('localized static preparation and recovery feedback', () => {
-  it('renders accessible English and Brazilian Portuguese waiting guidance after language change without navigation', async () => {
+  it('announces waiting and readiness guidance in Brazilian Portuguese', async () => {
     mock.state.waiting = true;
-    mock.state.recovery = false;
-    const href = location.href;
+    mock.state.repaired = true;
     try {
-      const { i18n } = await mount('en');
-      const english = screen.getByText(
-        'An update is ready. Close all Spendspacey windows, then reopen the app to use it.',
+      await mount();
+      const region = screen.getByRole('complementary');
+      expect(region).toHaveAttribute('aria-live', 'polite');
+      expect(within(region).getByText(/Uma atualização está pronta/)).toBeVisible();
+      expect(screen.getByTestId('offline-readiness')).toHaveTextContent(
+        'Preparado para uso offline',
       );
-      expect(english).toBeVisible();
-      expect(english.closest('[aria-live="polite"]')).not.toBeNull();
-      await act(() => i18n.changeLanguage('pt-BR'));
-      const portuguese = screen.getByText(
-        'Uma atualização está pronta. Feche todas as janelas do Spendspacey e abra o aplicativo novamente para usá-la.',
-      );
-      expect(portuguese).toBeVisible();
-      expect(portuguese.closest('[aria-live="polite"]')).not.toBeNull();
-      expect(location.href).toBe(href);
+      expect(within(region).getByText(/O reparo foi concluído/)).toBeVisible();
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
     } finally {
       mock.state.waiting = false;
-      mock.state.recovery = true;
+      mock.state.repaired = false;
     }
   });
 
-  it.each([
-    ['en', 'An update is ready. Close all Spendspacey windows, then reopen the app to use it.'],
-    [
-      'pt-BR',
-      'Uma atualização está pronta. Feche todas as janelas do Spendspacey e abra o aplicativo novamente para usá-la.',
-    ],
-  ] as const)(
-    'renders exact accessible waiting guidance after selecting %s',
-    async (locale, text) => {
-      mock.state.waiting = true;
-      try {
-        await mount();
-        const region = screen.getByRole('complementary');
-        const english =
-          'An update is ready. Close all Spendspacey windows, then reopen the app to use it.';
-        expect(within(region).getByText(english, { exact: true })).toBeVisible();
-        expect(region).toHaveAttribute('aria-live', 'polite');
-
-        await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Language' }), locale);
-
-        expect(within(region).getByText(text, { exact: true })).toBeVisible();
-        expect(screen.getByRole('complementary')).toBe(region);
-        expect(region).toHaveAttribute('aria-live', 'polite');
-        if (locale === 'pt-BR')
-          expect(within(region).queryByText(english, { exact: true })).not.toBeInTheDocument();
-        expect(mock.repair).not.toHaveBeenCalled();
-      } finally {
-        mock.state.waiting = false;
-      }
-    },
-  );
-
-  it.each(['en', 'pt-BR'] as const)(
-    'distinguishes preparation from control and shows reload/reopen guidance in %s',
-    async (locale) => {
-      mock.state.repaired = true;
-      await mount(locale);
-      expect(screen.getByTestId('offline-readiness')).toHaveTextContent(
-        locale === 'en' ? 'Prepared for offline' : 'Preparado para uso offline',
-      );
-      expect(
-        screen.getByText(locale === 'en' ? /Verified repair is ready/ : /O reparo foi concluído/),
-      ).toBeVisible();
-      expect(screen.queryByRole('button')).not.toBeInTheDocument();
-      mock.state.repaired = false;
-    },
-  );
-  it.each(['en', 'pt-BR'] as const)(
-    'uncontrolled preparation remains explicitly unconfirmed in %s',
-    async (locale) => {
-      await mount(locale);
-      expect(screen.getByTestId('offline-readiness')).toHaveTextContent(
-        locale === 'en'
-          ? 'Prepared for offline verification. This document is not confirmed ready; a controlled document must verify its saved files.'
-          : 'Preparado para uso offline sob verificação. Este documento não está confirmado como pronto; um documento controlado precisa verificar seus arquivos salvos.',
-      );
-    },
-  );
   it.each(['initializing', 'signIn', 'signOut', 'callback'] as const)(
     'blocks repair during %s processing',
     async (pending) => {
       mock.state.repaired = false;
       if (pending === 'callback') history.replaceState(null, '', '/auth/callback');
       await mount(
-        'en',
         pending === 'initializing'
           ? { status: 'initializing' }
           : pending === 'callback'

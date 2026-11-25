@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 @font-face {
   font-family: 'Google Sans';
@@ -16,6 +17,17 @@
   --color-muted: #e8eee7;
   --color-muted-foreground: #5c7168;
   --color-border: #d9e2da;
+  --radius: 0.75rem;
+  --color-card: #ffffff;
+  --color-card-foreground: var(--color-foreground);
+  --color-popover: #ffffff;
+  --color-popover-foreground: var(--color-foreground);
+  --color-accent: var(--color-muted);
+  --color-accent-foreground: var(--color-foreground);
+  --color-secondary: var(--color-muted);
+  --color-secondary-foreground: var(--color-foreground);
+  --color-input: var(--color-border);
+  --color-destructive: #b42327;
   --color-ring: #237a59;
   --font-google: 'Google Sans', Arial, sans-serif;
 }
@@ -47,4 +59,49 @@
   .app-safe-area {
     min-height: 100svh;
   }
+}
+
+@font-face {
+  font-family: Lato;
+  src: url('/fonts/lato-regular.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: Lato;
+  src: url('/fonts/lato-bold.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 700;
+}
+
+.finance-shell {
+  --finance-width: 100%;
+  --finance-padding: max(1rem, env(safe-area-inset-left), env(safe-area-inset-right));
+  font-family: Lato, system-ui, sans-serif;
+  padding-top: calc(4.5rem + env(safe-area-inset-top));
+}
+
+@media (min-width: 1280px) {
+  .finance-shell {
+    --finance-width: calc(100% / 3);
+  }
+}
+
+.finance-column {
+  width: var(--finance-width);
+  margin-inline: auto;
+  padding-inline: var(--finance-padding);
+}
+
+.finance-header {
+  padding-top: env(safe-area-inset-top);
+}
+
+.finance-dock {
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.finance-scroll {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
 }
