@@ -8,7 +8,7 @@ export interface Wallet {
   name: string;
   currency: Currency;
   created_by: string | null;
-  memberCount: number;
+  memberIds: string[];
 }
 
 export interface Category {

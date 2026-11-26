@@ -59,7 +59,7 @@ export function FinanceWorkspace({
   const { start, end } = periodRange(period);
   const activeId = active?.id;
   const details = useResource(
-    activeId ? `${access.epoch}:${activeId}` : null,
+    activeId ? `${access.epoch}:${activeId}:${active?.memberIds.join(',')}` : null,
     online,
     useCallback(
       (signal) =>
@@ -68,6 +68,9 @@ export function FinanceWorkspace({
           : Promise.reject(new Error('Nenhuma carteira selecionada.')),
       [activeId, client],
     ),
+  );
+  const members = details.data?.members.filter((member) =>
+    active?.memberIds.includes(member.user_id),
   );
   const transactions = useResource(
     activeId ? `${access.epoch}:${activeId}:${start}:${end}` : null,
@@ -88,8 +91,7 @@ export function FinanceWorkspace({
     current?: Transaction;
   }>();
   const draftRevoked =
-    draft &&
-    (list.error || (list.data && !wallets.some((wallet) => wallet.id === draft.wallet.id)));
+    draft && list.data && !wallets.some((wallet) => wallet.id === draft.wallet.id);
   if (draftRevoked) setDraft(undefined);
   const visibleDraft = draftRevoked ? undefined : draft;
   const closeDraft = () => {
@@ -201,8 +203,8 @@ export function FinanceWorkspace({
                     rows={transactions.data!}
                     categories={details.data!.categories}
                     currency={active.currency}
-                    members={details.data!.members}
-                    showMembers={active.memberCount > 1}
+                    members={members!}
+                    showMembers={active.memberIds.length > 1}
                     onEdit={edit}
                   />
                 ) : (
@@ -220,7 +222,7 @@ export function FinanceWorkspace({
                   client={client}
                   online={online}
                   rows={transactions.data!}
-                  members={details.data!.members}
+                  members={members!}
                   period={period}
                   onChange={refreshAll}
                 />
@@ -234,16 +236,20 @@ export function FinanceWorkspace({
           current={visibleDraft.current}
           categories={visibleDraft.data.categories}
           items={visibleDraft.data.items}
-          members={visibleDraft.data.members}
-          wallet={visibleDraft.wallet}
+          members={online ? (members ?? []) : []}
+          wallet={active ?? visibleDraft.wallet}
           userId={userId}
           online={online}
-          authorized={visibleDraft.wallet.id === activeId}
+          authorized={
+            visibleDraft.wallet.id === activeId &&
+            !!members?.some((member) => member.user_id === userId)
+          }
           accountIsCurrent={accountIsCurrent}
           client={client}
           rankedRows={visibleDraft.rows}
           close={closeDraft}
           onSaved={refreshAll}
+          onMembershipChanged={revalidateAccess}
         />
       )}
     </div>

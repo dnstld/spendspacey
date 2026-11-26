@@ -256,7 +256,7 @@ export function Categories({
                             categories={categories}
                             currency={wallet.currency}
                             members={members}
-                            showMembers={wallet.memberCount > 1}
+                            showMembers={wallet.memberIds.length > 1}
                           />
                         ) : (
                           <FinanceState

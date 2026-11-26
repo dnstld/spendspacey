@@ -54,6 +54,7 @@ export function TransactionForm({
   rankedRows,
   close,
   onSaved,
+  onMembershipChanged,
 }: {
   current?: Transaction;
   categories: Category[];
@@ -68,6 +69,7 @@ export function TransactionForm({
   rankedRows: Transaction[];
   close: () => void;
   onSaved: () => void;
+  onMembershipChanged: () => void;
 }) {
   const [kind, setKind] = useState<Kind>(
     initialCategories.find((category) => category.id === current?.category_id)?.type ?? 'expense',
@@ -76,9 +78,17 @@ export function TransactionForm({
   const [itemId, setItemId] = useState<string | null>(current?.category_item_id ?? null);
   const [day, setDay] = useState(current?.occurred_at ?? dateKey(new Date()));
   const [amount, setAmount] = useState(current?.amount_cents ?? 0);
-  const [beneficiary, setBeneficiary] = useState(
-    current?.on_behalf_of ?? (current?.created_by || userId),
-  );
+  const [chosenBeneficiary, setBeneficiary] = useState<string>();
+  const beneficiary = chosenBeneficiary ?? current?.on_behalf_of ?? current?.created_by ?? userId;
+  const unavailableBeneficiary =
+    online &&
+    !!chosenBeneficiary &&
+    !members.some((member) => member.user_id === chosenBeneficiary);
+  const historicalBeneficiary =
+    online &&
+    !chosenBeneficiary &&
+    !!current?.on_behalf_of &&
+    !members.some((member) => member.user_id === current.on_behalf_of);
   const [description, setDescription] = useState(current?.description ?? '');
   const [categories, setCategories] = useState(initialCategories);
   const [items, setItems] = useState(initialItems);
@@ -86,7 +96,7 @@ export function TransactionForm({
   const [search, setSearch] = useState('');
   const [duplicates, setDuplicates] = useState<Transaction[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<'failed' | 'conflict' | null>(null);
+  const [error, setError] = useState<'failed' | 'conflict' | 'beneficiary' | null>(null);
   const pending = useRef(false);
   const activeWrite = useRef<AbortController | null>(null);
   useLayoutEffect(() => {
@@ -132,7 +142,8 @@ export function TransactionForm({
   );
   const mostUsed = filtered.filter((value) => categoryUsage.has(value.id)).slice(0, 5);
   const rest = filtered.filter((value) => !mostUsed.includes(value));
-  const canSave = online && authorized && !!category && !!day && amount > 0 && !busy;
+  const canSave =
+    online && authorized && !!category && !!day && amount > 0 && !busy && !unavailableBeneficiary;
 
   function move(next: Step, value = '') {
     setError(null);
@@ -166,14 +177,14 @@ export function TransactionForm({
       await action(controller.signal);
     } catch (cause) {
       if (controller.signal.aborted) return;
-      setError(
-        cause &&
-          typeof cause === 'object' &&
-          'message' in cause &&
-          cause.message === 'web_transaction_retry_conflict'
-          ? 'conflict'
-          : 'failed',
-      );
+      const message =
+        cause && typeof cause === 'object' && 'message' in cause ? cause.message : undefined;
+      if (message === 'on_behalf_of must be a member of the wallet') {
+        setError('beneficiary');
+        onMembershipChanged();
+      } else {
+        setError(message === 'web_transaction_retry_conflict' ? 'conflict' : 'failed');
+      }
     } finally {
       activeWrite.current = null;
       pending.current = false;
@@ -209,7 +220,12 @@ export function TransactionForm({
               amount_cents: amount,
               description: description.trim(),
               category_item_id: itemId,
-              on_behalf_of: beneficiary === (current?.created_by ?? userId) ? null : beneficiary,
+              ...(!current || chosenBeneficiary !== undefined
+                ? {
+                    on_behalf_of:
+                      beneficiary === (current ? current.created_by : userId) ? null : beneficiary,
+                  }
+                : {}),
             },
           })
           .abortSignal(signal),
@@ -278,7 +294,9 @@ export function TransactionForm({
             description={
               error === 'conflict'
                 ? 'Já existe uma versão salva desta transação. Feche o rascunho e abra a transação na lista para alterá-la.'
-                : 'Seu rascunho continua aqui. Confira a conexão e tente novamente.'
+                : error === 'beneficiary'
+                  ? 'A lista de participantes mudou. Confira o beneficiário e tente novamente.'
+                  : 'Seu rascunho continua aqui. Confira a conexão e tente novamente.'
             }
             action={
               error === 'conflict'
@@ -379,9 +397,20 @@ export function TransactionForm({
                   ))}
               </div>
             </Field>
-            {wallet.memberCount > 1 && (
+            {(members.length > 1 || unavailableBeneficiary || historicalBeneficiary) && (
               <Field>
                 <span className="text-sm font-medium">Em nome de</span>
+                {unavailableBeneficiary && (
+                  <p role="alert">
+                    O beneficiário selecionado saiu da carteira. Selecione um participante atual.
+                  </p>
+                )}
+                {historicalBeneficiary && (
+                  <p role="status">
+                    O beneficiário original saiu da carteira. Ele será mantido se você não escolher
+                    outro participante.
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2" role="group" aria-label="Em nome de">
                   {members.map((value) => (
                     <Button
@@ -390,7 +419,10 @@ export function TransactionForm({
                       size="sm"
                       variant={beneficiary === value.user_id ? 'secondary' : 'outline'}
                       aria-pressed={beneficiary === value.user_id}
-                      onClick={() => setBeneficiary(value.user_id)}
+                      onClick={() => {
+                        setBeneficiary(value.user_id);
+                        setError(null);
+                      }}
                     >
                       {value.user_id === userId ? 'Eu' : memberName(value)}
                     </Button>
@@ -602,7 +634,7 @@ export function TransactionForm({
               categories={categories}
               currency={wallet.currency}
               members={members}
-              showMembers={wallet.memberCount > 1}
+              showMembers={wallet.memberIds.length > 1}
             />
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => move('form')}>

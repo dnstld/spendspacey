@@ -90,6 +90,13 @@ end
 $$;
 
 reset role;
+insert into public.categories (id, wallet_id, name, type) values
+  ('40000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000004', 'Histórico', 'expense');
+insert into public.transactions (id, wallet_id, category_id, amount_cents, occurred_at, created_by, on_behalf_of) values (
+  '30000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000004',
+  '40000000-0000-4000-8000-000000000001', 100, '2026-11-25',
+  '10000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002'
+);
 delete from public.wallet_members
 where wallet_id = '20000000-0000-4000-8000-000000000004'
   and user_id = '10000000-0000-4000-8000-000000000002';
@@ -103,6 +110,7 @@ declare
   target_category uuid;
   target_item uuid;
   target_transaction uuid := '30000000-0000-4000-8000-000000000001';
+  historical_transaction uuid := '30000000-0000-4000-8000-000000000002';
   owner uuid := auth.uid();
   other_member uuid := '10000000-0000-4000-8000-000000000002';
   draft jsonb;
@@ -136,6 +144,28 @@ begin
   if not exists (select 1 from public.transactions where id = target_transaction and amount_cents = 1400) then
     raise exception 'An explicit edit did not update the transaction';
   end if;
+  perform public.save_web_transaction(owner, historical_transaction, target_wallet, true,
+    (draft - 'on_behalf_of') || '{"amount_cents":1500}');
+  if not exists (
+    select 1 from public.transactions where id = historical_transaction
+      and amount_cents = 1500 and on_behalf_of = other_member
+  ) then
+    raise exception 'An ordinary edit lost the historical beneficiary';
+  end if;
+  begin
+    perform public.save_web_transaction(owner, target_transaction, target_wallet, true,
+      draft || jsonb_build_object('on_behalf_of', other_member));
+    raise exception 'An edit assigned a new departed beneficiary';
+  exception when raise_exception then
+    if sqlerrm <> 'on_behalf_of must be a member of the wallet' then raise; end if;
+  end;
+  begin
+    perform public.save_web_transaction(owner, gen_random_uuid(), target_wallet, false,
+      draft || jsonb_build_object('on_behalf_of', other_member));
+    raise exception 'A new transaction assigned a departed beneficiary';
+  exception when raise_exception then
+    if sqlerrm <> 'on_behalf_of must be a member of the wallet' then raise; end if;
+  end;
   if public.delete_web_personal_wallet(target_wallet) <> target_wallet then
     raise exception 'Personal deletion failed';
   end if;

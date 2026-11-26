@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { familyMember } from './finance-data';
+import { familyMember, owner, thirdMember } from './finance-data';
 
 test('reviews periods and category activity using the same wallet and date range', async ({
   page,
@@ -334,4 +334,73 @@ test('sign-out in a second tab cancels a save waiting for its duplicate lookup',
   }
   await processed.promise;
   expect(writes).toBe(0);
+});
+
+test('retains a draft through a transient membership failure and restores it on retry', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Nova transação', exact: true }).click();
+  await page.getByRole('button', { name: 'Mercado', exact: true }).click();
+  await page.getByLabel('Valor').fill('4321');
+  await context.setOffline(true);
+  await expect(page.getByRole('dialog').getByText(/Você está offline/)).toBeVisible();
+  const walletPath = /\/rest\/v1\/wallet_members\?/;
+  const failAccessCheck = (route: import('@playwright/test').Route) =>
+    route.fulfill({ status: 503, json: { message: 'Synthetic service outage' } });
+  await page.route(walletPath, failAccessCheck);
+  await context.setOffline(false);
+  await expect(page.getByRole('button', { name: 'Tentar novamente', exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.unroute(walletPath, failAccessCheck);
+  await page.getByRole('button', { name: 'Tentar novamente', exact: true }).click();
+  await expect(page.getByRole('dialog').getByLabel('Valor')).toHaveValue('4321');
+  await expect(page.getByRole('button', { name: 'Salvar', exact: true })).toBeEnabled();
+});
+
+test('updates the roster in an open draft when polling detects a member change', async ({
+  page,
+  auth,
+}) => {
+  await page.clock.install();
+  const wallet = auth.finance.wallets[0];
+  wallet.memberIds = [owner, familyMember, thirdMember];
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Nova transação', exact: true }).click();
+  await page.getByRole('button', { name: 'Mercado', exact: true }).click();
+  await page.getByLabel('Valor').fill('4321');
+  await page.getByRole('button', { name: 'Ana', exact: true }).click();
+  wallet.memberIds = [owner, thirdMember, 'replacement-member'];
+  await page.clock.fastForward(31_000);
+  await expect(page.getByText(/O beneficiário selecionado saiu da carteira/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ana', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Outra pessoa', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Valor')).toHaveValue('4321');
+  await expect(page.getByRole('button', { name: 'Salvar', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Bruno', exact: true }).click();
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(auth.finance.rows[0].on_behalf_of).toBe(thirdMember);
+});
+
+test('edits a historical transaction while keeping its departed beneficiary', async ({
+  page,
+  auth,
+}) => {
+  auth.finance.wallets[0].memberIds = [owner];
+  const transaction = auth.finance.rows[0];
+  transaction.on_behalf_of = familyMember;
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: /Mercado Feira/ }).click();
+  await expect(page.getByText(/O beneficiário original saiu da carteira/)).toBeVisible();
+  await page.getByLabel('Valor').fill('1500');
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(transaction).toMatchObject({ amount_cents: 1500, on_behalf_of: familyMember });
 });

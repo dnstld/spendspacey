@@ -76,6 +76,31 @@ revoke update on public.wallets from public, anon, authenticated;
 revoke update (created_by) on public.wallets from public, anon, authenticated;
 grant update (name, show_revenue) on public.wallets to authenticated;
 
+-- Keep historical attribution on ordinary edits after a beneficiary leaves.
+-- A new beneficiary or a change of wallet must still pass membership validation.
+create or replace function public.tg_transactions_validate_on_behalf_of()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.on_behalf_of = new.created_by then
+    new.on_behalf_of := null;
+  end if;
+  if new.on_behalf_of is null then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' then
+    if new.wallet_id = old.wallet_id and new.on_behalf_of = old.on_behalf_of then
+      return new;
+    end if;
+  end if;
+  if not public.is_wallet_member(new.wallet_id, new.on_behalf_of) then
+    raise exception 'on_behalf_of must be a member of the wallet';
+  end if;
+  return new;
+end;
+$$;
+
 create function public.save_web_transaction(
   p_expected_actor uuid,
   p_transaction_id uuid,
@@ -107,7 +132,8 @@ begin
     update public.transactions t
       set category_id = draft.category_id, occurred_at = draft.occurred_at,
         amount_cents = draft.amount_cents, description = draft.description,
-        category_item_id = draft.category_item_id, on_behalf_of = draft.on_behalf_of
+        category_item_id = draft.category_item_id,
+        on_behalf_of = case when p_draft ? 'on_behalf_of' then draft.on_behalf_of else t.on_behalf_of end
       where t.id = p_transaction_id and t.wallet_id = p_wallet_id and t.status = 'completed'
       returning t.id into saved_id;
 

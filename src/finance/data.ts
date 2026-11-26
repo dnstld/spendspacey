@@ -29,12 +29,12 @@ export async function readWallets(client: SupabaseClient, userId: string, signal
       .range(from, to)
       .abortSignal(signal)
       .returns<
-        { wallets: Omit<Wallet, 'memberCount'> & { wallet_members: { user_id: string }[] } }[]
+        { wallets: Omit<Wallet, 'memberIds'> & { wallet_members: { user_id: string }[] } }[]
       >(),
   );
   return rows.map(({ wallets: { wallet_members, ...wallet } }) => ({
     ...wallet,
-    memberCount: wallet_members.length,
+    memberIds: wallet_members.map(({ user_id }) => user_id).sort(),
   }));
 }
 

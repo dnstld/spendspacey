@@ -264,7 +264,7 @@ export function Wallets({
             change();
           }}
           onDelete={
-            wallet.memberCount === 1 && wallet.created_by === userId
+            wallet.memberIds.length === 1 && wallet.created_by === userId
               ? async () => {
                   checked(
                     await client.rpc('delete_web_personal_wallet', { p_wallet_id: wallet.id }),

@@ -8,8 +8,14 @@ import {
 } from '../src/finance/model';
 import { syntheticSession } from '../test/session';
 
-const owner = syntheticSession().user.id;
+export const owner = syntheticSession().user.id;
 export const familyMember = '20000000-0000-4000-8000-000000000001';
+export const thirdMember = '20000000-0000-4000-8000-000000000002';
+const memberNames: Record<string, string> = {
+  [owner]: 'Test Person',
+  [familyMember]: 'Ana',
+  [thirdMember]: 'Bruno',
+};
 
 export function isFinancePath(path: string) {
   return /^\/rest\/v1\/(?:wallet_members|wallets|categories|category_items|transactions|rpc\/(?:list_wallet_members|create_web_wallet|delete_web_personal_wallet|save_web_transaction))$/.test(
@@ -19,9 +25,15 @@ export function isFinancePath(path: string) {
 
 export function financeFixture() {
   const wallets: Wallet[] = [
-    { id: 'shared', name: 'Família', currency: 'BRL', created_by: owner, memberCount: 2 },
-    { id: 'dollars', name: 'Viagem', currency: 'USD', created_by: owner, memberCount: 1 },
-    { id: 'euros', name: 'Europa', currency: 'EUR', created_by: owner, memberCount: 1 },
+    {
+      id: 'shared',
+      name: 'Família',
+      currency: 'BRL',
+      created_by: owner,
+      memberIds: [owner, familyMember],
+    },
+    { id: 'dollars', name: 'Viagem', currency: 'USD', created_by: owner, memberIds: [owner] },
+    { id: 'euros', name: 'Europa', currency: 'EUR', created_by: owner, memberIds: [owner] },
   ];
   const categories: (Category & { wallet_id: string })[] = [
     { id: 'market', name: 'Mercado', type: 'expense', archived_at: null, wallet_id: 'shared' },
@@ -75,28 +87,19 @@ export function financeFixture() {
     switch (url.pathname) {
       case '/rest/v1/wallet_members':
         return json(
-          wallets.map(({ memberCount, ...wallet }) => ({
+          wallets.map(({ memberIds, ...wallet }) => ({
             wallet_id: wallet.id,
-            wallets: {
-              ...wallet,
-              wallet_members: [
-                { user_id: owner },
-                ...(memberCount > 1 ? [{ user_id: familyMember }] : []),
-              ],
-            },
+            wallets: { ...wallet, wallet_members: memberIds.map((user_id) => ({ user_id })) },
           })),
         );
       case '/rest/v1/rpc/list_wallet_members': {
         const wallet = wallets.find((value) => value.id === request.postDataJSON().p_wallet_id);
         return json(
-          wallet
-            ? [
-                { user_id: owner, display_name: 'Test Person', email: 'person@example.test' },
-                ...(wallet.memberCount > 1
-                  ? [{ user_id: familyMember, display_name: 'Ana', email: 'ana@example.test' }]
-                  : []),
-              ]
-            : [],
+          wallet?.memberIds.map((user_id) => ({
+            user_id,
+            display_name: memberNames[user_id] ?? 'Outra pessoa',
+            email: null,
+          })) ?? [],
         );
       }
       case '/rest/v1/rpc/create_web_wallet': {
@@ -107,7 +110,7 @@ export function financeFixture() {
             name: p_name,
             currency: p_currency,
             created_by: owner,
-            memberCount: 1,
+            memberIds: [owner],
           });
         }
         return json(p_wallet_id);
@@ -115,7 +118,7 @@ export function financeFixture() {
       case '/rest/v1/rpc/delete_web_personal_wallet': {
         const { p_wallet_id } = request.postDataJSON();
         const index = wallets.findIndex(
-          (wallet) => wallet.id === p_wallet_id && wallet.memberCount === 1,
+          (wallet) => wallet.id === p_wallet_id && wallet.memberIds.length === 1,
         );
         if (index < 0) return route.fulfill({ status: 403, json: { code: '42501' } });
         wallets.splice(index, 1);
@@ -178,6 +181,18 @@ export function financeFixture() {
         const row = rows.find(
           (value) => value.id === p_transaction_id && value.wallet_id === p_wallet_id,
         );
+        if (
+          p_draft.on_behalf_of &&
+          (!p_edit || p_draft.on_behalf_of !== row?.on_behalf_of) &&
+          !wallets
+            .find((wallet) => wallet.id === p_wallet_id)
+            ?.memberIds.includes(p_draft.on_behalf_of)
+        ) {
+          return route.fulfill({
+            status: 400,
+            json: { message: 'on_behalf_of must be a member of the wallet' },
+          });
+        }
         if (p_edit) {
           if (!row) return route.fulfill({ status: 403 });
           Object.assign(row, p_draft, { updated_by: owner });
