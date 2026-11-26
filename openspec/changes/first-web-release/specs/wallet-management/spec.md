@@ -28,13 +28,17 @@ Wallet creation SHALL require a nonblank name and a currency in BRL, USD, or EUR
 
 ### Requirement: Independent wallet settings
 
-Carteiras SHALL show a full-width form for each wallet with a name field, visible read-only currency, its own save action, and an active indicator on the selected wallet. Nova carteira SHALL add an inline creation form. Eligible personal wallets SHALL expose deletion with explicit confirmation. Shared wallets SHALL have no deletion action.
+Carteiras SHALL show a full-width form for each wallet with a name field, visible read-only currency, its own save action, and an active indicator on the selected wallet. Nova carteira SHALL add an inline creation form. Eligible personal wallets SHALL expose a hide action with explicit confirmation. Hidden wallets SHALL remain in Carteiras with a restore action. The visibility preference SHALL apply to the current account in the web app only. Shared wallets SHALL have no hide action.
 
 #### Scenario: Manage an inactive wallet
 - **WHEN** the user renames an inactive wallet
 - **THEN** the rename appears in its card and selector while the current selection stays active
 
-#### Scenario: Delete a personal wallet
-- **WHEN** the user confirms deletion of an eligible personal wallet and the server confirms it
-- **THEN** that wallet is removed
+#### Scenario: Hide a personal wallet
+- **WHEN** the user confirms hiding a personal wallet and the server confirms it
+- **THEN** that wallet disappears from the account's web selector and its records remain intact
 - **AND** if it was active, the app selects an available wallet
+
+#### Scenario: Restore a hidden wallet
+- **WHEN** the user restores a hidden wallet from Carteiras
+- **THEN** that wallet becomes available in the account's web selector

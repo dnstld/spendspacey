@@ -7,7 +7,7 @@ export interface Wallet {
   id: string;
   name: string;
   currency: Currency;
-  created_by: string | null;
+  hidden: boolean;
   memberIds: string[];
 }
 

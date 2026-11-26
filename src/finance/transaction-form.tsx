@@ -78,17 +78,20 @@ export function TransactionForm({
   const [itemId, setItemId] = useState<string | null>(current?.category_item_id ?? null);
   const [day, setDay] = useState(current?.occurred_at ?? dateKey(new Date()));
   const [amount, setAmount] = useState(current?.amount_cents ?? 0);
-  const [chosenBeneficiary, setBeneficiary] = useState<string>();
-  const beneficiary = chosenBeneficiary ?? current?.on_behalf_of ?? current?.created_by ?? userId;
+  const [chosenBeneficiary, setBeneficiary] = useState<string | null>();
+  const beneficiary =
+    chosenBeneficiary === undefined
+      ? (current?.on_behalf_of ?? current?.created_by ?? userId)
+      : chosenBeneficiary;
   const unavailableBeneficiary =
     online &&
     !!chosenBeneficiary &&
     !members.some((member) => member.user_id === chosenBeneficiary);
-  const historicalBeneficiary =
+  const departedHistoricalBeneficiary =
     online &&
-    !chosenBeneficiary &&
     !!current?.on_behalf_of &&
     !members.some((member) => member.user_id === current.on_behalf_of);
+  const historicalBeneficiary = departedHistoricalBeneficiary && chosenBeneficiary === undefined;
   const [description, setDescription] = useState(current?.description ?? '');
   const [categories, setCategories] = useState(initialCategories);
   const [items, setItems] = useState(initialItems);
@@ -143,7 +146,14 @@ export function TransactionForm({
   const mostUsed = filtered.filter((value) => categoryUsage.has(value.id)).slice(0, 5);
   const rest = filtered.filter((value) => !mostUsed.includes(value));
   const canSave =
-    online && authorized && !!category && !!day && amount > 0 && !busy && !unavailableBeneficiary;
+    online &&
+    authorized &&
+    !!category &&
+    !!day &&
+    amount > 0 &&
+    !busy &&
+    !unavailableBeneficiary &&
+    !historicalBeneficiary;
 
   function move(next: Step, value = '') {
     setError(null);
@@ -397,7 +407,7 @@ export function TransactionForm({
                   ))}
               </div>
             </Field>
-            {(members.length > 1 || unavailableBeneficiary || historicalBeneficiary) && (
+            {(members.length > 1 || unavailableBeneficiary || departedHistoricalBeneficiary) && (
               <Field>
                 <span className="text-sm font-medium">Em nome de</span>
                 {unavailableBeneficiary && (
@@ -407,11 +417,24 @@ export function TransactionForm({
                 )}
                 {historicalBeneficiary && (
                   <p role="status">
-                    O beneficiário original saiu da carteira. Ele será mantido se você não escolher
-                    outro participante.
+                    O beneficiário original saiu da carteira. Para salvar, escolha um participante
+                    atual ou remova a atribuição.
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2" role="group" aria-label="Em nome de">
+                  {current && (departedHistoricalBeneficiary || unavailableBeneficiary) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setBeneficiary(null);
+                        setError(null);
+                      }}
+                    >
+                      Remover beneficiário
+                    </Button>
+                  )}
                   {members.map((value) => (
                     <Button
                       type="button"

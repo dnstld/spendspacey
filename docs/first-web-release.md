@@ -8,16 +8,18 @@ Read-only hosted metadata confirmed the current schema migration at `20260809120
 
 The application reads wallet membership scoped to the signed-in user and lets existing Contas policies authorize wallet and finance operations. The wallet member function supplies available names for transaction attribution. Only completed transactions count toward period totals. Reusable descriptions are scoped by wallet and category.
 
-The [release migration](../supabase/migrations/20261125120000_spendspacey_web_wallets.sql) adds the web wallet functions and a transaction save function. The Contas creation and shared-wallet deletion functions keep their behavior. The web create function reuses the wallet bootstrap trigger and accepts a request ID for safe retry. The web delete function locks the wallet, checks eligibility in the same transaction, and removes dependent transactions before deleting the wallet. Authenticated clients may update the wallet name and display preference. Creator identity is protected from client updates, and existing creator values are carried forward. The transaction function uses the authenticated actor, checks the expected account, and compares the saved payload on a retry. An edit keeps the recorded beneficiary when that field is untouched. New beneficiary assignments require current membership.
+The [proposed web migration](../supabase/migrations/20261125120000_spendspacey_web_wallets.sql) creates a private preference table and four new web RPCs. It preserves the existing Contas functions, tables, triggers, RLS policies, and grants. Web wallet creation uses the existing membership bootstrap trigger and a request ID for safe retries. Hiding a personal wallet stores a per-account web preference and can be reversed in Carteiras. The wallet, membership, and transactions remain available in Contas.
 
-A disposable local Supabase database ran the full checked-in Contas migration history and the web migration. The [rollback-only SQL test](../supabase/tests/web_wallets.sql) covered the web fourth wallet, legacy limit, invalid currency, immutable currency, unauthenticated grants, denied shared deletion and non-owner deletion, and deletion of a personal wallet containing a linked transaction. Production database review and rollout remain separate steps. Coordinate the migration history with the Contas repository before using its migration push again.
+Transaction saves use existing Contas policies and triggers. The web RPC checks the expected account and compares the saved payload on a retry. An edit keeps a current beneficiary if the field is untouched. When the recorded beneficiary has left the wallet, the web form asks the user to choose a current member or explicitly clear the beneficiary before saving.
+
+The web browser suite uses synthetic API fixtures. The revised migration and [rollback-only SQL checks](../supabase/tests/web_wallets.sql) await database verification under the project owner's control.
 
 ## Release sequence
 
 1. Complete the app checks and independent review.
-2. Wait for the project owner to apply the reviewed forward migration to the verified Supabase project. Confirm the functions and grants through metadata. Preserve existing signup and RLS configuration.
+2. Wait for the project owner to verify and apply the reviewed web migration. Confirm its new functions and grants through metadata.
 3. Publish the approved main revision through the existing [Cloudflare Pages workflow](deployment.md).
-4. Check the production origin, worker, sign-in path, and asset delivery. Record the user's separate desktop and installed-phone acceptance after deployment.
+4. Check the web production origin, worker, sign-in path, and asset delivery. Record the user's desktop and installed web app acceptance after deployment.
 
 The brand mark can fall back to the existing cached app icon. Both Lato weights are embedded in the precached workspace stylesheet so offline launch loads the same fonts. The worker retains its existing static content policy, including precached executable chunks, styles, and Google sign-in assets. The finance client does not cache account or wallet responses for offline access.
 

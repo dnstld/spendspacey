@@ -24,6 +24,10 @@ The form SHALL offer expense or income, a date defaulting to today, calculator-s
 - **THEN** the form retains the amount, selects the new category, and the saved transaction records both actor and beneficiary
 - **AND** a beneficiary outside the current wallet is rejected
 
+#### Scenario: Correct a transaction with a former beneficiary
+- **WHEN** the user edits a transaction whose beneficiary has left the wallet
+- **THEN** saving requires a deliberate choice to clear the beneficiary or assign an eligible current member
+
 ### Requirement: Reusable descriptions are category scoped
 
 Para quê SHALL support one-time typed text and selecting or saving reusable items within the chosen category. A saved item with an expected amount SHALL fill an empty amount field. Changing category SHALL clear the old item link.

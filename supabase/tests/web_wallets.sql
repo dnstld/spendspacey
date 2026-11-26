@@ -9,9 +9,11 @@ insert into auth.users (id, email) values
 do $$
 begin
   if has_function_privilege('anon', 'public.create_web_wallet(uuid,text,text)', 'EXECUTE')
-    or has_function_privilege('anon', 'public.delete_web_personal_wallet(uuid)', 'EXECUTE')
+    or has_function_privilege('anon', 'public.list_web_hidden_wallets()', 'EXECUTE')
+    or has_function_privilege('anon', 'public.set_web_wallet_hidden(uuid,boolean)', 'EXECUTE')
+    or has_schema_privilege('authenticated', 'spendspacey_web', 'USAGE')
     or has_function_privilege('anon', 'public.save_web_transaction(uuid,uuid,uuid,boolean,jsonb)', 'EXECUTE') then
-    raise exception 'Anonymous callers have access';
+    raise exception 'Web-only objects have unexpected grants';
   end if;
 end
 $$;
@@ -21,7 +23,7 @@ select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001
 
 do $$
 declare
-  wallet_id uuid := '20000000-0000-4000-8000-000000000004';
+  target_wallet uuid := '20000000-0000-4000-8000-000000000004';
 begin
   perform public.create_wallet('Primeira', 'BRL');
   perform public.create_wallet('Segunda', 'USD');
@@ -33,13 +35,18 @@ begin
     if sqlerrm <> 'free_tier_limit' then raise; end if;
   end;
 
-  if public.create_web_wallet(wallet_id, 'Quarta', 'EUR') <> wallet_id
-    or public.create_web_wallet(wallet_id, 'Quarta', 'EUR') <> wallet_id then
+  if public.create_web_wallet(target_wallet, 'Quarta', 'EUR') <> target_wallet
+    or public.create_web_wallet(target_wallet, 'Quarta', 'EUR') <> target_wallet then
     raise exception 'Creation or retry did not return the wallet';
   end if;
-  if not exists (select 1 from public.wallets where id = wallet_id and currency = 'EUR')
-    or not public.is_wallet_member(wallet_id) then
+  if not exists (select 1 from public.wallets where id = target_wallet and currency = 'EUR')
+    or not public.is_wallet_member(target_wallet) then
     raise exception 'Creation did not set currency and initial membership';
+  end if;
+  perform public.set_web_wallet_hidden(target_wallet, true);
+  perform public.set_web_wallet_hidden(target_wallet, true);
+  if (select count(*) from public.list_web_hidden_wallets() h where h.wallet_id = target_wallet) <> 1 then
+    raise exception 'Hidden wallet missing or duplicated after retry';
   end if;
   begin
     perform public.create_web_wallet(gen_random_uuid(), 'Inválida', 'GBP');
@@ -47,7 +54,7 @@ begin
   exception when invalid_parameter_value then null;
   end;
   begin
-    update public.wallets set currency = 'USD' where id = wallet_id;
+    update public.wallets set currency = 'USD' where id = target_wallet;
     raise exception 'Currency was changeable';
   exception when others then
     if sqlerrm = 'Currency was changeable' then raise; end if;
@@ -63,29 +70,21 @@ insert into public.wallet_members (wallet_id, user_id) values
 set local role authenticated;
 do $$
 declare
-  wallet_id uuid := '20000000-0000-4000-8000-000000000004';
+  target_wallet uuid := '20000000-0000-4000-8000-000000000004';
 begin
   begin
-    perform public.delete_web_personal_wallet(wallet_id);
-    raise exception 'Shared owner could delete the wallet';
+    perform public.set_web_wallet_hidden(target_wallet, true);
+    raise exception 'A shared wallet could be hidden';
   exception when insufficient_privilege then null;
   end;
   perform set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000002', true);
-  update public.wallets set name = 'Renamed', show_revenue = true where id = wallet_id;
-  if not exists (select 1 from public.wallets where id = wallet_id and name = 'Renamed' and show_revenue) then
+  update public.wallets set name = 'Renamed', show_revenue = true where id = target_wallet;
+  if not exists (select 1 from public.wallets where id = target_wallet and name = 'Renamed' and show_revenue) then
     raise exception 'Contas rename or display preference was denied';
   end if;
-  begin
-    update public.wallets set created_by = auth.uid() where id = wallet_id;
-    raise exception 'Client could replace the wallet creator';
-  exception when insufficient_privilege then null;
-  end;
-
-  begin
-    perform public.delete_web_personal_wallet(wallet_id);
-    raise exception 'Non-owner could delete the wallet';
-  exception when insufficient_privilege then null;
-  end;
+  if exists (select 1 from public.list_web_hidden_wallets()) then
+    raise exception 'Another member could read the owner preference';
+  end if;
 end
 $$;
 
@@ -144,13 +143,20 @@ begin
   if not exists (select 1 from public.transactions where id = target_transaction and amount_cents = 1400) then
     raise exception 'An explicit edit did not update the transaction';
   end if;
+  begin
+    perform public.save_web_transaction(owner, historical_transaction, target_wallet, true,
+      (draft - 'on_behalf_of') || '{"amount_cents":1500}');
+    raise exception 'The legacy beneficiary check was bypassed';
+  exception when raise_exception then
+    if sqlerrm <> 'on_behalf_of must be a member of the wallet' then raise; end if;
+  end;
   perform public.save_web_transaction(owner, historical_transaction, target_wallet, true,
-    (draft - 'on_behalf_of') || '{"amount_cents":1500}');
+    draft || '{"amount_cents":1500,"on_behalf_of":null}');
   if not exists (
     select 1 from public.transactions where id = historical_transaction
-      and amount_cents = 1500 and on_behalf_of = other_member
+      and amount_cents = 1500 and on_behalf_of is null
   ) then
-    raise exception 'An ordinary edit lost the historical beneficiary';
+    raise exception 'The explicit clear was not saved with the corrected amount';
   end if;
   begin
     perform public.save_web_transaction(owner, target_transaction, target_wallet, true,
@@ -166,17 +172,16 @@ begin
   exception when raise_exception then
     if sqlerrm <> 'on_behalf_of must be a member of the wallet' then raise; end if;
   end;
-  if public.delete_web_personal_wallet(target_wallet) <> target_wallet then
-    raise exception 'Personal deletion failed';
+  perform public.set_web_wallet_hidden(target_wallet, false);
+  if exists (select 1 from public.list_web_hidden_wallets() h where h.wallet_id = target_wallet) then
+    raise exception 'Wallet visibility could not be restored';
   end if;
-end
-$$;
-
-reset role;
-do $$
-begin
-  if exists (select 1 from public.wallets where id = '20000000-0000-4000-8000-000000000004') then
-    raise exception 'Personal wallet remains after deletion';
+  perform public.set_web_wallet_hidden(target_wallet, true);
+  if not exists (select 1 from public.list_web_hidden_wallets() h where h.wallet_id = target_wallet)
+    or not exists (select 1 from public.wallets where id = target_wallet)
+    or not public.is_wallet_member(target_wallet)
+    or not exists (select 1 from public.transactions where id = target_transaction) then
+    raise exception 'Web hiding changed shared data or failed to save the preference';
   end if;
 end
 $$;

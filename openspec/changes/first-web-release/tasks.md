@@ -17,8 +17,8 @@
 ## 3. Existing accounts and wallets
 
 - [x] 3.1 Verify the configured project, existing family enrollment boundary, Contas schema and migration ownership using code and hosted metadata. Record the compatible wallet/member/finance contract, the effective creation cap, and rollout order without capturing private rows.
-- [x] 3.2 Implement the authorized forward backend change if needed for uncapped web wallet creation and eligibility-checked personal deletion. Verify atomic creation, a fourth wallet, invalid currency and caller denial, immutable currency, shared-wallet denial, and Contas compatibility on a disposable database.
-- [x] 3.3 Wire real membership-scoped wallet selection and wallet forms, including BRL default, immutable currency, active indicator, independent save, and confirmation before eligible personal deletion. Verify late read isolation and active selection after creation or deletion with synthetic accounts.
+- [ ] 3.2 Review the proposed web-only database objects for uncapped creation, private visibility preferences, and safe transaction saves. Record database verification under the project owner’s control.
+- [x] 3.3 Wire real membership-scoped wallet selection and wallet forms, including BRL default, immutable currency, active indicator, independent save, and confirmation before hiding an eligible personal wallet. Verify access isolation, active selection after creation or hiding, and restoration with synthetic accounts.
 
 ## 4. Transactions and categories
 
@@ -31,7 +31,7 @@
 ## 5. Production delivery and acceptance
 
 - [x] 5.1 Pass the applicable format, lint, type, unit, config, build, delivery, worker, Chromium, secret-scan, and strict OpenSpec checks. Review the production artifact and verify private API responses remain outside worker caches.
-- [ ] 5.2 Record CI and independent review, then apply only the verified compatible forward backend migration if needed. Merge the accepted app release into main and verify its Cloudflare Pages build and canonical publication.
+- [ ] 5.2 Record CI and independent review, then wait for the project owner to apply the verified additive web migration. Merge the accepted app release into main and verify its Cloudflare Pages build and canonical publication.
 - [ ] 5.3 Verify the deployed commit, canonical sign-in behavior, static assets and worker update, and smoke results. Give the user the live URL and the short desktop and installed-phone review checklist.
 - [ ] 5.4 Record the user's post-deployment findings for long wallet names, everyday transaction and category flows, and installed-app offline continuity. Resolve accepted findings and record final acceptance.
 

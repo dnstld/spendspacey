@@ -19,21 +19,39 @@ async function allRows<T>(page: (from: number, to: number) => PromiseLike<Result
 }
 
 export async function readWallets(client: SupabaseClient, userId: string, signal: AbortSignal) {
-  const rows = await allRows((from, to) =>
-    client
-      .from('wallet_members')
-      .select('wallet_id, wallets!inner(id,name,currency,created_by,wallet_members(user_id))')
-      .eq('user_id', userId)
-      .order('joined_at')
-      .order('wallet_id')
-      .range(from, to)
-      .abortSignal(signal)
-      .returns<
-        { wallets: Omit<Wallet, 'memberIds'> & { wallet_members: { user_id: string }[] } }[]
-      >(),
-  );
+  const [rows, hidden] = await Promise.all([
+    allRows((from, to) =>
+      client
+        .from('wallet_members')
+        .select('wallet_id, wallets!inner(id,name,currency,wallet_members(user_id))')
+        .eq('user_id', userId)
+        .order('joined_at')
+        .order('wallet_id')
+        .range(from, to)
+        .abortSignal(signal)
+        .returns<
+          {
+            wallets: Omit<Wallet, 'memberIds' | 'hidden'> & {
+              wallet_members: { user_id: string }[];
+            };
+          }[]
+        >(),
+    ),
+    allRows<{ wallet_id: string }>((from, to) =>
+      client
+        .rpc('list_web_hidden_wallets')
+        .range(from, to)
+        .abortSignal(signal)
+        .then(({ data, error }) => ({
+          data: Array.isArray(data) ? (data as { wallet_id: string }[]) : null,
+          error,
+        })),
+    ),
+  ]);
+  const hiddenIds = new Set(hidden.map(({ wallet_id }) => wallet_id));
   return rows.map(({ wallets: { wallet_members, ...wallet } }) => ({
     ...wallet,
+    hidden: hiddenIds.has(wallet.id),
     memberIds: wallet_members.map(({ user_id }) => user_id).sort(),
   }));
 }

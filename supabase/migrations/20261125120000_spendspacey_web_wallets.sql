@@ -1,4 +1,14 @@
--- Add web-only entry points. The existing Contas RPCs retain their contracts.
+-- Add web-only entry points and preferences. Existing Contas objects stay untouched.
+create schema spendspacey_web;
+revoke all on schema spendspacey_web from public, anon, authenticated, service_role;
+
+create table spendspacey_web.hidden_wallets (
+  user_id uuid not null,
+  wallet_id uuid not null,
+  primary key (user_id, wallet_id)
+);
+alter table spendspacey_web.hidden_wallets enable row level security;
+revoke all on spendspacey_web.hidden_wallets from public, anon, authenticated, service_role;
 create function public.create_web_wallet(p_wallet_id uuid, p_name text, p_currency text)
 returns uuid
 language plpgsql security definer set search_path = ''
@@ -38,68 +48,52 @@ begin
 end;
 $$;
 
-create function public.delete_web_personal_wallet(p_wallet_id uuid)
+create function public.list_web_hidden_wallets()
+returns table (wallet_id uuid)
+language sql stable security definer set search_path = ''
+as $$
+  select h.wallet_id
+  from spendspacey_web.hidden_wallets h
+  where h.user_id = auth.uid()
+    and public.is_wallet_member(h.wallet_id)
+  order by h.wallet_id;
+$$;
+
+create function public.set_web_wallet_hidden(p_wallet_id uuid, p_hidden boolean)
 returns uuid
 language plpgsql security definer set search_path = ''
 as $$
 declare
   caller uuid := auth.uid();
 begin
-  if caller is null then
-    raise exception 'not authenticated' using errcode = '42501';
-  end if;
-  -- A foreign-key insert into wallet_members takes a conflicting key-share lock.
-  perform 1 from public.wallets w where w.id = p_wallet_id and w.created_by = caller for update;
-  if not found or not exists (
-    select 1 from public.wallet_members m where m.wallet_id = p_wallet_id and m.user_id = caller
-  ) or exists (
-    select 1 from public.wallet_members m where m.wallet_id = p_wallet_id and m.user_id <> caller
-  ) then
-    raise exception 'wallet is not eligible for personal deletion' using errcode = '42501';
+  if caller is null or p_hidden is null or not public.is_wallet_member(p_wallet_id) then
+    raise exception 'web_wallet_unavailable' using errcode = '42501';
   end if;
 
-  -- Remove dependent rows before wallet cascade reaches RESTRICT foreign keys.
-  delete from public.transactions where wallet_id = p_wallet_id;
-  delete from public.wallets where id = p_wallet_id;
+  if p_hidden then
+    if exists (
+      select 1 from public.wallet_members m
+      where m.wallet_id = p_wallet_id and m.user_id <> caller
+    ) then
+      raise exception 'web_wallet_not_personal' using errcode = '42501';
+    end if;
+    insert into spendspacey_web.hidden_wallets (user_id, wallet_id)
+      values (caller, p_wallet_id)
+      on conflict do nothing;
+  else
+    delete from spendspacey_web.hidden_wallets h
+      where h.user_id = caller and h.wallet_id = p_wallet_id;
+  end if;
   return p_wallet_id;
 end;
 $$;
 
 revoke execute on function public.create_web_wallet(uuid, text, text) from public, anon, service_role;
-revoke execute on function public.delete_web_personal_wallet(uuid) from public, anon, service_role;
+revoke execute on function public.list_web_hidden_wallets() from public, anon, service_role;
+revoke execute on function public.set_web_wallet_hidden(uuid, boolean) from public, anon, service_role;
 grant execute on function public.create_web_wallet(uuid, text, text) to authenticated;
-grant execute on function public.delete_web_personal_wallet(uuid) to authenticated;
-
--- Keep the Contas rename and display preference writes. Creator identity
--- remains writable by internal database operations, including FK cleanup.
-revoke update on public.wallets from public, anon, authenticated;
-revoke update (created_by) on public.wallets from public, anon, authenticated;
-grant update (name, show_revenue) on public.wallets to authenticated;
-
--- Keep historical attribution on ordinary edits after a beneficiary leaves.
--- A new beneficiary or a change of wallet must still pass membership validation.
-create or replace function public.tg_transactions_validate_on_behalf_of()
-returns trigger
-language plpgsql security definer set search_path = ''
-as $$
-begin
-  if new.on_behalf_of = new.created_by then
-    new.on_behalf_of := null;
-  end if;
-  if new.on_behalf_of is null then
-    return new;
-  end if;
-  if tg_op = 'UPDATE' then
-    if new.wallet_id = old.wallet_id and new.on_behalf_of = old.on_behalf_of then
-      return new;
-    end if;
-  end if;
-  if not public.is_wallet_member(new.wallet_id, new.on_behalf_of) then
-    raise exception 'on_behalf_of must be a member of the wallet';
-  end if;
-  return new;
-end;
-$$;
+grant execute on function public.list_web_hidden_wallets() to authenticated;
+grant execute on function public.set_web_wallet_hidden(uuid, boolean) to authenticated;
 
 create function public.save_web_transaction(
   p_expected_actor uuid,

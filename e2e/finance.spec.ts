@@ -62,7 +62,7 @@ test('preserves a transaction draft through item autofill, a failed save, and du
   expect(auth.finance.rows.filter((row) => row.amount_cents === 4200)).toHaveLength(2);
 });
 
-test('creates a fourth wallet, switches to it, and keeps shared-wallet deletion out of the settings', async ({
+test('creates a fourth wallet and hides and restores it in the web workspace', async ({
   page,
   auth,
 }) => {
@@ -75,7 +75,7 @@ test('creates a fourth wallet, switches to it, and keeps shared-wallet deletion 
   await expect(
     page
       .getByRole('form', { name: 'Gerenciar Família' })
-      .getByRole('button', { name: 'Excluir carteira' }),
+      .getByRole('button', { name: 'Ocultar carteira no app web' }),
   ).toHaveCount(0);
   const inactive = page.getByRole('form', { name: 'Gerenciar Viagem' });
   await inactive.getByLabel('Nome da carteira').fill('Viagem de férias');
@@ -91,9 +91,16 @@ test('creates a fourth wallet, switches to it, and keeps shared-wallet deletion 
   const preferences = page.getByRole('form', { name: 'Gerenciar Poupança' });
   await expect(preferences.getByLabel('Moeda')).toHaveAttribute('readonly', '');
   expect(auth.finance.wallets).toHaveLength(4);
-  await preferences.getByRole('button', { name: 'Excluir carteira' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Excluir carteira' }).click();
+  await preferences.getByRole('button', { name: 'Ocultar carteira no app web' }).click();
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: 'Ocultar carteira no app web' })
+    .click();
   await expect(page.getByRole('combobox', { name: 'Carteira ativa' })).toHaveText('Família');
+  await expect(preferences.getByText('Oculta no app web')).toBeVisible();
+  expect(auth.finance.wallets).toHaveLength(4);
+  await preferences.getByRole('button', { name: 'Mostrar no app web' }).click();
+  await expect(preferences.getByText('Oculta no app web')).toHaveCount(0);
 });
 
 test('keeps the signed-in workspace and blocks API writes while offline', async ({
@@ -388,7 +395,7 @@ test('updates the roster in an open draft when polling detects a member change',
   expect(auth.finance.rows[0].on_behalf_of).toBe(thirdMember);
 });
 
-test('edits a historical transaction while keeping its departed beneficiary', async ({
+test('requires explicit attribution resolution before editing a historical transaction', async ({
   page,
   auth,
 }) => {
@@ -400,7 +407,11 @@ test('edits a historical transaction while keeping its departed beneficiary', as
   await page.getByRole('button', { name: /Mercado Feira/ }).click();
   await expect(page.getByText(/O beneficiário original saiu da carteira/)).toBeVisible();
   await page.getByLabel('Valor').fill('1500');
-  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  const save = page.getByRole('button', { name: 'Salvar', exact: true });
+  await expect(save).toBeDisabled();
+  expect(transaction.on_behalf_of).toBe(familyMember);
+  await page.getByRole('button', { name: 'Remover beneficiário', exact: true }).click();
+  await save.click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(transaction).toMatchObject({ amount_cents: 1500, on_behalf_of: familyMember });
+  expect(transaction).toMatchObject({ amount_cents: 1500, on_behalf_of: null });
 });

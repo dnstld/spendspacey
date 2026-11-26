@@ -18,7 +18,7 @@ const memberNames: Record<string, string> = {
 };
 
 export function isFinancePath(path: string) {
-  return /^\/rest\/v1\/(?:wallet_members|wallets|categories|category_items|transactions|rpc\/(?:list_wallet_members|create_web_wallet|delete_web_personal_wallet|save_web_transaction))$/.test(
+  return /^\/rest\/v1\/(?:wallet_members|wallets|categories|category_items|transactions|rpc\/(?:list_wallet_members|create_web_wallet|list_web_hidden_wallets|set_web_wallet_hidden|save_web_transaction))$/.test(
     path,
   );
 }
@@ -29,11 +29,11 @@ export function financeFixture() {
       id: 'shared',
       name: 'Família',
       currency: 'BRL',
-      created_by: owner,
+      hidden: false,
       memberIds: [owner, familyMember],
     },
-    { id: 'dollars', name: 'Viagem', currency: 'USD', created_by: owner, memberIds: [owner] },
-    { id: 'euros', name: 'Europa', currency: 'EUR', created_by: owner, memberIds: [owner] },
+    { id: 'dollars', name: 'Viagem', currency: 'USD', hidden: false, memberIds: [owner] },
+    { id: 'euros', name: 'Europa', currency: 'EUR', hidden: false, memberIds: [owner] },
   ];
   const categories: (Category & { wallet_id: string })[] = [
     { id: 'market', name: 'Mercado', type: 'expense', archived_at: null, wallet_id: 'shared' },
@@ -87,9 +87,14 @@ export function financeFixture() {
     switch (url.pathname) {
       case '/rest/v1/wallet_members':
         return json(
-          wallets.map(({ memberIds, ...wallet }) => ({
-            wallet_id: wallet.id,
-            wallets: { ...wallet, wallet_members: memberIds.map((user_id) => ({ user_id })) },
+          wallets.map(({ id, name, currency, memberIds }) => ({
+            wallet_id: id,
+            wallets: {
+              id,
+              name,
+              currency,
+              wallet_members: memberIds.map((user_id) => ({ user_id })),
+            },
           })),
         );
       case '/rest/v1/rpc/list_wallet_members': {
@@ -109,19 +114,23 @@ export function financeFixture() {
             id: p_wallet_id,
             name: p_name,
             currency: p_currency,
-            created_by: owner,
+            hidden: false,
             memberIds: [owner],
           });
         }
         return json(p_wallet_id);
       }
-      case '/rest/v1/rpc/delete_web_personal_wallet': {
-        const { p_wallet_id } = request.postDataJSON();
-        const index = wallets.findIndex(
-          (wallet) => wallet.id === p_wallet_id && wallet.memberIds.length === 1,
+      case '/rest/v1/rpc/list_web_hidden_wallets':
+        return json(
+          wallets.filter((wallet) => wallet.hidden).map((wallet) => ({ wallet_id: wallet.id })),
         );
-        if (index < 0) return route.fulfill({ status: 403, json: { code: '42501' } });
-        wallets.splice(index, 1);
+      case '/rest/v1/rpc/set_web_wallet_hidden': {
+        const { p_wallet_id, p_hidden } = request.postDataJSON();
+        const wallet = wallets.find((wallet) => wallet.id === p_wallet_id);
+        if (!wallet || (p_hidden && wallet.memberIds.length !== 1)) {
+          return route.fulfill({ status: 403, json: { code: '42501' } });
+        }
+        wallet.hidden = p_hidden;
         return json(p_wallet_id);
       }
       case '/rest/v1/wallets': {
@@ -181,12 +190,10 @@ export function financeFixture() {
         const row = rows.find(
           (value) => value.id === p_transaction_id && value.wallet_id === p_wallet_id,
         );
+        const beneficiary = 'on_behalf_of' in p_draft ? p_draft.on_behalf_of : row?.on_behalf_of;
         if (
-          p_draft.on_behalf_of &&
-          (!p_edit || p_draft.on_behalf_of !== row?.on_behalf_of) &&
-          !wallets
-            .find((wallet) => wallet.id === p_wallet_id)
-            ?.memberIds.includes(p_draft.on_behalf_of)
+          beneficiary &&
+          !wallets.find((wallet) => wallet.id === p_wallet_id)?.memberIds.includes(beneficiary)
         ) {
           return route.fulfill({
             status: 400,

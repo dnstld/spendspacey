@@ -29,7 +29,9 @@ Use the existing root document and callback ownership model. Start the signed-in
 
 ### Align the web data contract with Contas
 
-Use the configured project's existing Auth and wallet data after verifying the hosted schema and migration owner against Contas source. Reuse documented read projections, member attribution, date-only transaction storage, category item links, and existing membership enforcement where they meet the web requirements. Check the checked-in cap in Contas's wallet-create RPC and its clients before deciding the forward change. Prefer an additive web creation contract when changing the legacy RPC would alter Contas behavior. Maintain atomic wallet and initial membership creation. Personal deletion must check eligibility server-side in the same operation, including protection against a concurrent membership change. Test authorization and legacy client compatibility against a disposable database before any production change.
+Use the configured project's existing Auth, records, read projections, and membership enforcement. Add web entry points for creating wallets and saving transactions. The web creation function uses the existing membership bootstrap trigger and imposes no count ceiling. Wallet visibility is a per-account preference stored in a private web schema. A member can hide a personal wallet and restore it later. Existing Contas definitions, policies, and grants are preserved.
+
+Current member attribution is required by the existing transaction trigger. If the historical beneficiary has left the wallet, the form asks the user to set a current beneficiary or explicitly clear the field. The project owner controls verification and execution of the additive web migration.
 
 ### Keep formatting and totals at the domain boundary
 
@@ -48,6 +50,6 @@ The archived online-profile change records the accepted behavior at revision `15
 ## Migration plan
 
 1. Preserve the current checkout and develop on the clean release worktree. Reconcile the already accepted online-profile closure from the local branch and the historical specs on main before final spec synchronization. Record older plans as historical or superseded without marking unexecuted tasks complete.
-2. Verify stock components and real server contracts as part of building the complete release. Stage and test any forward database migration before the web client depends on it.
+2. Verify stock components and web flows with synthetic APIs. The project owner verifies and applies the reviewed web migration before deploying the web client.
 3. Pass full synthetic verification and independent review, merge to main, and verify the canonical Cloudflare Pages publication and installed PWA behavior. Rollback uses the prior accepted worker-aware deployment and preserves compatible wallet data.
 4. Hand over the deployed release for the user's review, including the long wallet-name case and installed phone flow. Record actual acceptance separately from automated evidence.
