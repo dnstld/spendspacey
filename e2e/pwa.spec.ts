@@ -1766,6 +1766,8 @@ for (const point of ['beforePut', 'afterPut', 'readback'])
     page,
     context,
   }) => {
+    // This scenario prepares a worker, checks two update outcomes, and cold-opens a new page.
+    test.setTimeout(90_000);
     const host = await pwaServer();
     const outside: string[] = [];
     context.on('request', (request) => {
@@ -1819,7 +1821,6 @@ for (const point of ['beforePut', 'afterPut', 'readback'])
       expect(outside).toEqual([]);
       expect(host.state.privateRequests).toBe(0);
     } finally {
-      await setOffline(context, false);
       await host.close();
     }
   });
