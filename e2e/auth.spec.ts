@@ -9,11 +9,13 @@ for (const path of callbackPaths) {
   }) => {
     auth.returnPath = path;
     await page.goto('/');
-    await page.getByRole('button', { name: 'Sign in with Google' }).click();
+    await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
     await expect(page).toHaveURL(`${baseURL}/`);
     expect(auth.exchanges).toBe(1);
     await page.reload();
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
     expect(auth.exchanges).toBe(1);
   });
@@ -25,50 +27,31 @@ for (const width of [360, 1280]) {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Spendspacey' })).toBeVisible();
     await expect(page.getByRole('button')).toHaveCount(1);
-    await expect(page.getByRole('combobox', { name: 'Language' })).toBeVisible();
-    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('combobox')).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
     await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
-    await expect(page.getByRole('button')).toHaveCount(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
   });
 }
 
-for (const [locale, expected] of [
-  ['pt-PT', 'pt-BR'],
-  ['de-DE', 'en'],
-] as const) {
-  test.describe(`device locale ${locale}`, () => {
-    test.use({ locale });
-    test('selects the supported locale without persisting detection', async ({ page }) => {
-      await page.goto('/');
-      await expect(page.getByRole('combobox')).toHaveValue(expected);
-      await expect(page.locator('html')).toHaveAttribute('lang', expected);
-      expect(await page.evaluate(() => localStorage.getItem('spendspacey.locale'))).toBeNull();
-    });
+test.describe('English browser with a legacy language preference', () => {
+  test.use({ locale: 'en-US' });
+  test('initial render and reload use Brazilian Portuguese', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('spendspacey.locale', 'en'));
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
+    await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
   });
-}
-
-test('reevaluates changed device preferences on reload without an explicit selection', async ({
-  page,
-}) => {
-  await page.goto('/');
-  await expect(page.getByRole('combobox')).toHaveValue('en');
-  await page.addInitScript(() =>
-    Object.defineProperty(navigator, 'languages', { get: () => ['pt-PT'] }),
-  );
-  await page.reload();
-  await expect(page.getByRole('combobox')).toHaveValue('pt-BR');
-  expect(await page.evaluate(() => localStorage.getItem('spendspacey.locale'))).toBeNull();
 });
 
 for (const suffix of [
@@ -77,10 +60,8 @@ for (const suffix of [
 ]) {
   test(`callback cancellation is localized and scrubbed (${suffix[0]})`, async ({ page, auth }) => {
     await page.goto(`/auth/callback${suffix}`);
-    await expect(page.getByRole('alert')).toContainText('cancelled');
-    await expect(page).toHaveURL('http://127.0.0.1:4173/auth/callback');
-    await page.getByRole('combobox').selectOption('pt-BR');
     await expect(page.getByRole('alert')).toContainText('cancelado');
+    await expect(page).toHaveURL('http://127.0.0.1:4173/auth/callback');
     await expect(page.getByRole('main')).not.toContainText('synthetic-private-message');
     expect(auth.exchanges).toBe(0);
     await page.getByRole('link', { name: 'Voltar' }).click();
@@ -95,12 +76,12 @@ test('callback with a code but no PKCE verifier offers recovery without a token 
   await page.goto('/auth/callback?code=synthetic-code');
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveText(
-    'We could not complete sign-in. Please start again.',
+    'Não foi possível concluir o login. Comece novamente.',
   );
-  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
-  await expect(page.getByRole('link', { name: 'Back' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Back' })).toHaveAttribute('href', '/');
+  await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeEnabled();
+  await expect(page.getByRole('link', { name: 'Voltar' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Voltar' })).toHaveAttribute('href', '/');
   await expect(page).toHaveURL('http://127.0.0.1:4173/auth/callback');
   await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
   await expect(page.getByText('person@example.test')).toHaveCount(0);
@@ -109,9 +90,9 @@ test('callback with a code but no PKCE verifier offers recovery without a token 
 
 test('direct callback entry and unknown routes recover to the root shell', async ({ page }) => {
   await page.goto('/auth/callback');
-  await expect(page.getByRole('alert')).toContainText('unavailable or has expired');
-  await page.getByRole('link', { name: 'Back' }).click();
-  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('indisponível ou expirou');
+  await page.getByRole('link', { name: 'Voltar' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
   await page.goto('/unknown-route');
   await expect(page).toHaveURL('http://127.0.0.1:4173/');
 });
@@ -122,10 +103,10 @@ test('unknown-user signup rejection shows recovery without an authenticated sess
 }) => {
   auth.mode = 'signup-disabled';
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
-  await expect(page.getByRole('alert')).toContainText('This account cannot sign in');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await expect(page.getByRole('alert')).toContainText('Esta conta não pode entrar');
   await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeEnabled();
   await expect(page).toHaveURL('http://127.0.0.1:4173/auth/callback');
   expect(auth.exchanges).toBe(0);
 });
@@ -136,11 +117,12 @@ test('failed code exchange offers a fresh login without automatic code replay', 
 }) => {
   auth.mode = 'exchange-failure';
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
-  await expect(page.getByRole('alert')).toContainText('unavailable or has expired');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await expect(page.getByRole('alert')).toContainText('indisponível ou expirou');
   expect(auth.exchanges).toBe(1);
   auth.mode = 'success';
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
   expect(auth.exchanges).toBe(2);
 });
@@ -148,10 +130,11 @@ test('failed code exchange offers a fresh login without automatic code replay', 
 test('broken avatar keeps the authenticated identity usable', async ({ page, auth }) => {
   auth.brokenAvatar = true;
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
-  await expect(page.getByRole('img', { name: 'Profile photo unavailable' })).toBeVisible();
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
+  await expect(page.getByRole('img', { name: 'Foto de perfil indisponível' })).toBeVisible();
   await expect(page.getByText('person@example.test')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign out' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Sair' })).toBeEnabled();
 });
 
 test('profile failures remain localized and retry only the current-user read', async ({
@@ -160,13 +143,14 @@ test('profile failures remain localized and retry only the current-user read', a
 }) => {
   auth.profileMode = 'malformed';
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
-  await expect(page.getByRole('alert')).toContainText('could not load your profile safely');
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('carregar seu perfil com segurança');
   await expect(page.getByText('person@example.test')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
   expect(auth.profileReads).toBe(1);
   auth.profileMode = 'success';
-  await page.getByRole('button', { name: 'Try loading the profile again' }).click();
+  await page.getByRole('button', { name: 'Tentar carregar o perfil novamente' }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
   expect(auth.profileReads).toBe(2);
 });
@@ -174,8 +158,9 @@ test('profile failures remain localized and retry only the current-user read', a
 test('a missing profile never fabricates a database card', async ({ page, auth }) => {
   auth.profileMode = 'missing';
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
-  await expect(page.getByText('Your database profile is not available.')).toBeVisible();
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
+  await expect(page.getByText('Seu perfil no banco de dados não está disponível.')).toBeVisible();
   await expect(page.getByText('person@example.test')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
   expect(auth.profileReads).toBe(1);
@@ -187,51 +172,51 @@ test('one localized current-user card stays on the root route at narrow width', 
 }) => {
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
-  await expect(page.getByRole('region', { name: 'Your profile' })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Seu perfil' })).toHaveCount(1);
   await expect(page.getByRole('heading', { name: 'Test Person' })).toHaveCount(1);
   await expect(page.getByText('person@example.test')).toHaveCount(1);
   expect(auth.profileReads).toBe(1);
   await page.goto('/profiles');
   await expect(page).toHaveURL('http://127.0.0.1:4173/');
-  await expect(page.getByRole('region', { name: 'Your profile' })).toHaveCount(1);
-  await page.getByRole('combobox', { name: 'Language' }).selectOption('pt-BR');
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Seu perfil' })).toHaveCount(1);
   await expect(page.getByRole('img', { name: 'Foto do perfil de Test Person' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole('combobox', { name: 'Idioma' }).focus();
-  await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: 'Sair' })).toBeFocused();
 });
 
 test('current-session sign-out is reflected in a second tab', async ({ page, context }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
   const second = await context.newPage();
   await second.goto('/');
+  await second.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(second.getByRole('heading', { name: 'Test Person' })).toBeVisible();
-  await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(second.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
-  await expect(second.getByRole('region', { name: 'Your profile' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Sair' }).click();
+  await expect(second.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
+  await expect(second.getByRole('region', { name: 'Seu perfil' })).toHaveCount(0);
   await expect(second.getByRole('heading', { name: 'Test Person' })).toHaveCount(0);
 });
 
-test('PKCE callback, session restoration, preference persistence, and local sign-out', async ({
+test('PKCE callback, session restoration, Brazilian Portuguese, and local sign-out', async ({
   page,
   auth,
 }) => {
   await page.goto('/');
-  await page.getByRole('combobox', { name: 'Language' }).selectOption('pt-BR');
   await page.getByRole('button', { name: 'Entrar com o Google' }).click();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
   await expect(page.getByText('person@example.test')).toBeVisible();
   await expect(page.getByRole('img', { name: 'Foto do perfil de Test Person' })).toBeVisible();
   await expect(page).toHaveURL('http://127.0.0.1:4173/');
   expect(auth.exchanges).toBe(1);
   await page.reload();
+  await page.getByRole('button', { name: 'Carteiras', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Test Person' })).toBeVisible();
-  await expect(page.getByRole('combobox', { name: 'Idioma' })).toHaveValue('pt-BR');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
   await page.getByRole('button', { name: 'Sair' }).click();
   await expect(page.getByRole('button', { name: 'Entrar com o Google' })).toBeVisible();
   await page.reload();

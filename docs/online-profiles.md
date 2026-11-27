@@ -25,3 +25,14 @@ Sign-out attempts, account changes, rejected reads, and cross-tab sign-out clear
 ## Acceptance boundary
 
 Synthetic unit/component and Chromium tests cover query shape, rendering, localization, narrow/keyboard use, account switching, cross-tab removal, reload, and offline cache privacy. Production publication and the installed iPhone/Chrome Home Screen acceptance remain a separate post-merge gate; desktop automation does not replace that evidence.
+
+## Production and installed-app acceptance — 2026-11-05
+
+- Revision: merge commit `1549022f7902ffaf477b4bd1294d98bc658adf1f` from PR #10.
+- Production: `https://spendspacey.pages.dev` (deployment publication `https://29d1b8de.spendspacey.pages.dev`).
+- Device: iPhone 16 Pro running iOS 26.6.2 and Chrome 155.0.8059.37.
+- The enrolled PM used the existing Home Screen installation created through Google Chrome without reinstalling it. The Spendspacey name, icon, standalone presentation, and update behavior passed.
+- With the device online and the existing enrolled identity signed in, `/` showed exactly one own-profile card through the existing live read. Only pass/fail was recorded; no profile values or account identifiers were captured.
+- Signing out removed the profile card immediately and returned the signed-out screen.
+- A cold offline launch of the same installed app showed the application shell and unavailable/connection guidance without restoring the profile.
+- No profile insertion, migration, policy change, or RLS broadening was performed for acceptance.

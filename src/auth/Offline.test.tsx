@@ -9,9 +9,13 @@ import { initializeI18n } from '@/i18n';
 import { authMock, deferred } from '../../test/authMock';
 import { syntheticSession } from '../../test/session';
 
-async function mount(mock = authMock(), url = '/', locale: 'en' | 'pt-BR' = 'en') {
+vi.mock('@/finance/workspace', () => ({
+  FinanceWorkspace: ({ account }: { account: import('react').ReactNode }) => <>{account}</>,
+}));
+
+async function mount(mock = authMock(), url = '/') {
   history.replaceState(null, '', url);
-  const instance = await initializeI18n(createInstance(), locale);
+  const instance = await initializeI18n(createInstance());
   render(
     <I18nextProvider i18n={instance}>
       <MemoryRouter initialEntries={[url]}>
@@ -32,8 +36,7 @@ describe('offline authentication', () => {
     const read = deferred<Awaited<ReturnType<typeof mock.auth.getSession>>>();
     mock.auth.getSession.mockReturnValue(read.promise);
     await mount(mock);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Connect to restore');
-    await userEvent.selectOptions(screen.getByRole('combobox'), 'pt-BR');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Conecte-se para restaurar');
     expect(screen.getByRole('alert')).toHaveTextContent('Conecte-se');
     await act(async () => read.resolve({ data: { session: syntheticSession() }, error: null }));
     expect(await screen.findByText('person@example.test')).toBeVisible();
@@ -47,8 +50,8 @@ describe('offline authentication', () => {
       mock.auth.getSession.mockReturnValue(new Promise(() => {}));
       await mount(mock);
       await act(() => vi.advanceTimersByTimeAsync(8000));
-      expect(screen.getByRole('alert')).toHaveTextContent('Connect to restore');
-      expect(screen.getByRole('combobox')).toBeEnabled();
+      expect(screen.getByRole('alert')).toHaveTextContent('Conecte-se para restaurar');
+      expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeEnabled();
     } finally {
       vi.useRealTimers();
     }
@@ -64,19 +67,19 @@ describe('offline authentication', () => {
         });
       await mount(mock);
       const action = await screen.findByRole('button', {
-        name: signedIn ? 'Sign out' : 'Sign in with Google',
+        name: signedIn ? 'Sair' : 'Entrar com o Google',
       });
       offline();
       await userEvent.click(action);
       expect(screen.getByRole('alert')).toHaveTextContent(
-        signedIn ? 'Connect to sign out' : 'Connect to sign in',
+        signedIn ? 'Conecte-se para sair' : 'Conecte-se para entrar',
       );
       expect(mock.auth.signOut).not.toHaveBeenCalled();
       expect(mock.auth.signInWithOAuth).not.toHaveBeenCalled();
       act(() => window.dispatchEvent(new Event('online')));
       expect(mock.auth.signOut).not.toHaveBeenCalled();
       expect(mock.auth.signInWithOAuth).not.toHaveBeenCalled();
-      await userEvent.click(screen.getByRole('button', { name: 'Try the connection' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Testar a conexão' }));
       expect(signedIn ? mock.auth.signOut : mock.auth.signInWithOAuth).toHaveBeenCalledOnce();
     },
   );
@@ -85,14 +88,14 @@ describe('offline authentication', () => {
     const mock = authMock();
     mock.auth.getSession.mockResolvedValue({ data: { session: syntheticSession() }, error: null });
     await mount(mock, '/auth/callback?code=private-code#access_token=private-token');
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not finish offline');
+    expect(await screen.findByRole('alert')).toHaveTextContent('concluir este login offline');
     expect(location.search + location.hash).toBe('');
     expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
     act(() => window.dispatchEvent(new Event('online')));
     expect(mock.auth.exchangeCodeForSession).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('link', { name: 'Back' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Voltar' }));
     expect(await screen.findByText('person@example.test')).toBeVisible();
-    expect(screen.getByRole('alert')).toHaveTextContent('Connect to load your profile');
+    expect(screen.getByRole('alert')).toHaveTextContent('Conecte-se para carregar seu perfil');
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     expect(mock.auth.signOut).not.toHaveBeenCalled();
   });

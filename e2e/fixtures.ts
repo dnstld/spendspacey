@@ -2,6 +2,7 @@ import { test as base, expect } from '@playwright/test';
 import { SYNTHETIC_ENV } from '../test/config';
 import { syntheticSession } from '../test/session';
 import { pagesHeadersFor } from '../test/pagesHeaders';
+import { financeFixture, isFinancePath } from './finance-data';
 import { callbackRoute } from '../src/lib/callbackRoute';
 
 interface AuthFixture {
@@ -12,6 +13,7 @@ interface AuthFixture {
   profileReads: number;
   profileMode: 'success' | 'missing' | 'error' | 'malformed';
   networkAvailable: boolean;
+  finance: ReturnType<typeof financeFixture>;
 }
 
 export const test = base.extend<{ auth: AuthFixture }>({
@@ -25,6 +27,7 @@ export const test = base.extend<{ auth: AuthFixture }>({
         profileReads: 0,
         profileMode: 'success',
         networkAvailable: true,
+        finance: financeFixture(),
       };
       const unexpected: string[] = [];
       const errors: string[] = [];
@@ -119,6 +122,7 @@ export const test = base.extend<{ auth: AuthFixture }>({
               ],
             });
           }
+          if (isFinancePath(url.pathname)) return auth.finance.handle(route);
         }
         if (
           url.href === 'https://images.example.test/avatar.png' ||

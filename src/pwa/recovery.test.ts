@@ -39,7 +39,10 @@ async function page(
   let sequence = 0;
   const document = {
     title: '',
-    documentElement: { lang: '', getAttribute: () => (options.resourceLoss ? 'verified' : null) },
+    documentElement: {
+      lang: 'pt-BR',
+      getAttribute: () => (options.resourceLoss ? 'verified' : null),
+    },
     getElementById: (id: string) => {
       const e = elements.get(id)!;
       return Object.assign(e, {
@@ -152,21 +155,21 @@ describe('embedded recovery fixed localization and message rendering', () => {
       ['idle', 'Choose Repair online', 'Escolha Reparar com conexão'],
       ['offline', 'You appear to be offline', 'Você parece estar sem conexão'],
       ['busy', 'Repair is running', 'O reparo está em andamento'],
-      ['failed', 'Repair failed', 'O reparo falhou'],
+      ['failed', 'O reparo falhou', 'O reparo falhou'],
       ['timed-out', 'deadline', 'atingiu o prazo'],
       ['cancelled', 'Repair was cancelled', 'O reparo foi cancelado'],
-      ['unknown', 'unknown or interrupted', 'desconhecido ou foi interrompido'],
+      ['unknown', 'desconhecido ou foi interrompido', 'desconhecido ou foi interrompido'],
       ['spent', 'previous attempt is spent', 'tentativa anterior foi utilizada'],
       ['complete', 'Reload or reopen Spendspacey', 'Recarregue ou reabra o Spendspacey'],
       ['unavailable', 'Repair is unavailable', 'reparo está indisponível'],
     ])(
       `renders %s explicitly in ${locale} without network or automatic repair`,
-      async (status, en, pt) => {
+      async (status, _english, pt) => {
         const p = await page(locale, status);
-        expect(p.document.documentElement.lang).toBe(locale);
-        expect(p.elements.get('status')!.textContent).toContain(locale === 'en' ? en : pt);
+        expect(p.document.documentElement.lang).toBe('pt-BR');
+        expect(p.elements.get('status')!.textContent).toContain(pt);
         expect(p.requests.map((r) => r.operation)).toEqual(['HELLO', 'CONFIRM']);
-        expect(p.reads).toEqual(['spendspacey.locale']);
+        expect(p.reads).toEqual([]);
         expect(p.network).not.toHaveBeenCalled();
         expect(p.reload).not.toHaveBeenCalled();
         expect(p.elements.get('repair')!.disabled).toBe(
@@ -175,29 +178,26 @@ describe('embedded recovery fixed localization and message rendering', () => {
       },
     );
   it.each([
-    [null, ['en-US', 'pt-BR'], 'en'],
+    [null, ['en-US', 'pt-BR'], 'pt-BR'],
     [null, ['pt-PT', 'en-US'], 'pt-BR'],
-    ['unsupported', ['de-DE'], 'en'],
+    ['unsupported', ['de-DE'], 'pt-BR'],
     ['<script>', ['invalid_tag', 'pt-BR'], 'pt-BR'],
-    ['en', ['pt-BR'], 'en'],
+    ['en', ['pt-BR'], 'pt-BR'],
     ['pt-BR', ['en-US'], 'pt-BR'],
   ])('preserves locale validation/detection order: %s %s', async (saved, languages, expected) => {
     const p = await page(saved, 'idle', { languages });
     expect(p.document.documentElement.lang).toBe(expected);
     expect(p.elements.get('intro')!.textContent).not.toContain('<script>');
   });
-  it('handles denied locale storage and keeps language selection in memory', async () => {
-    const p = await page(null, 'idle', { denied: true, languages: ['pt-BR'] });
+  it('renders with denied storage and never writes a language choice', async () => {
+    const p = await page(null, 'idle', { denied: true, languages: ['en-US'] });
     expect(p.document.documentElement.lang).toBe('pt-BR');
-    const select = p.elements.get('language')!;
-    select.value = 'en';
-    select.listeners.get('change')!();
-    expect(p.document.documentElement.lang).toBe('en');
-    expect(p.writes).toEqual(['spendspacey.locale']);
+    expect(p.reads).toEqual([]);
+    expect(p.writes).toEqual([]);
   });
   it('guidance without verified binding has no repair/confirmation authority', async () => {
     const p = await page('en', 'idle', { binding: false });
-    expect(p.elements.get('status')!.textContent).toContain('no verified document binding');
+    expect(p.elements.get('status')!.textContent).toContain('vínculo de documento verificado');
     expect(p.elements.get('repair')!.disabled).toBe(true);
     p.elements.get('repair')!.listeners.get('click')!();
     expect(p.requests.map((r) => r.operation)).toEqual(['HELLO']);
@@ -225,7 +225,7 @@ describe('embedded recovery fixed localization and message rendering', () => {
 it('metadata unavailability returns explicit recovery guidance and no confirmation or repair authority', async () => {
   const p = await page('en', 'unavailable', { binding: false });
   expect(p.elements.get('status')!.textContent).toContain(
-    'temporarily cannot access or validate saved state',
+    'não pode acessar ou validar o estado salvo',
   );
   expect(p.elements.get('repair')!.disabled).toBe(true);
   expect(p.requests.map((r) => r.operation)).toEqual(['HELLO']);
@@ -287,18 +287,14 @@ describe('current-controller recovery handshake', () => {
     async (locale) => {
       const p = await page(locale, 'idle', { binding: false, intact: true });
       expect(p.elements.get('intro')!.textContent).toBe(
-        locale === 'en'
-          ? 'Spendspacey cannot currently verify a usable saved application. This recovery page does not sign in or load your account.'
-          : 'O Spendspacey não pode verificar um aplicativo salvo utilizável no momento. Esta página de recuperação não faz login nem carrega sua conta.',
+        'O Spendspacey não pode verificar um aplicativo salvo utilizável no momento. Esta página de recuperação não faz login nem carrega sua conta.',
       );
       expect(p.elements.get('status')!.textContent).toBe(
-        locale === 'en'
-          ? 'This page has no verified document binding. Saved files may still be intact. Repair is unavailable. A new document requires independent verification; reopening is not a verified remedy.'
-          : 'Esta página não tem um vínculo de documento verificado. Os arquivos salvos ainda podem estar intactos. O reparo está indisponível. Um novo documento exige verificação independente; reabrir não é uma solução verificada.',
+        'Esta página não tem um vínculo de documento verificado. Os arquivos salvos ainda podem estar intactos. O reparo está indisponível. Um novo documento exige verificação independente; reabrir não é uma solução verificada.',
       );
       expect(p.elements.get('repair')!.disabled).toBe(true);
       expect(p.elements.get('cancel')!.disabled).toBe(true);
-      expect(p.reads).toEqual(['spendspacey.locale']);
+      expect(p.reads).toEqual([]);
       expect(p.writes).toEqual([]);
       p.elements.get('check')!.listeners.get('click')!();
       await settle();
@@ -313,9 +309,7 @@ it.each(['en', 'pt-BR'])(
   async (locale) => {
     const p = await page(locale, 'idle', { resourceLoss: true });
     expect(p.elements.get('intro')!.textContent).toBe(
-      locale === 'en'
-        ? 'This document opened because required saved application files were missing or corrupt. This recovery page does not sign in or load your account.'
-        : 'Este documento foi aberto porque arquivos salvos necessários estavam ausentes ou corrompidos. Esta página de recuperação não faz login nem carrega sua conta.',
+      'Este documento foi aberto porque arquivos salvos necessários estavam ausentes ou corrompidos. Esta página de recuperação não faz login nem carrega sua conta.',
     );
   },
 );
@@ -355,21 +349,17 @@ it.each(['en', 'pt-BR'])(
   async (locale) => {
     const unavailable = await page(locale, 'unavailable', { binding: false, intact: true });
     expect(unavailable.elements.get('status')!.textContent).toBe(
-      locale === 'en'
-        ? 'Recovery temporarily cannot access or validate saved state or activation. This does not establish missing or corrupt files. Repair is unavailable. Check status later; reopening is not a verified remedy.'
-        : 'A recuperação temporariamente não pode acessar ou validar o estado salvo ou a ativação. Isso não comprova arquivos ausentes ou corrompidos. O reparo está indisponível. Consulte o estado mais tarde; reabrir não é uma solução verificada.',
+      'A recuperação temporariamente não pode acessar ou validar o estado salvo ou a ativação. Isso não comprova arquivos ausentes ou corrompidos. O reparo está indisponível. Consulte o estado mais tarde; reabrir não é uma solução verificada.',
     );
     const invalid = await page(locale, 'blocked', { binding: false, intact: true });
     expect(invalid.elements.get('status')!.textContent).toBe(
-      locale === 'en'
-        ? 'Saved-state validation failed. Recovery cannot establish safe ownership or application files. Repair is unavailable. Reopening is not a verified remedy.'
-        : 'A validação do estado salvo falhou. A recuperação não pode estabelecer propriedade ou arquivos seguros do aplicativo. O reparo está indisponível. Reabrir não é uma solução verificada.',
+      'A validação do estado salvo falhou. A recuperação não pode estabelecer propriedade ou arquivos seguros do aplicativo. O reparo está indisponível. Reabrir não é uma solução verificada.',
     );
     for (const result of [unavailable, invalid]) {
       expect(result.elements.get('repair')!.disabled).toBe(true);
       expect(result.elements.get('cancel')!.disabled).toBe(true);
       expect(result.requests.every((request) => request.operation === 'HELLO')).toBe(true);
-      expect(result.reads).toEqual(['spendspacey.locale']);
+      expect(result.reads).toEqual([]);
     }
   },
 );

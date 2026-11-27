@@ -29,13 +29,18 @@ export default function App({ client }: { client?: SupabaseClient }) {
   }
   return (
     <AuthProvider client={client}>
-      <Shell>
-        <Routes>
-          <Route path="/" element={<AuthScreen />} />
-          <Route {...callbackRoute} element={<AuthCallback />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Shell>
+      <Routes>
+        <Route path="/" element={<AuthScreen />} />
+        <Route
+          {...callbackRoute}
+          element={
+            <Shell>
+              <AuthCallback />
+            </Shell>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </AuthProvider>
   );
 }
