@@ -1,14 +1,14 @@
--- Add web-only entry points and preferences. Existing Contas objects stay untouched.
+-- Add web-only entry points and wallet creator records. Existing Contas objects stay untouched.
 create schema spendspacey_web;
 revoke all on schema spendspacey_web from public, anon, authenticated, service_role;
 
-create table spendspacey_web.hidden_wallets (
-  user_id uuid not null,
-  wallet_id uuid not null,
-  primary key (user_id, wallet_id)
+create table spendspacey_web.wallet_creators (
+  wallet_id uuid primary key references public.wallets(id) on delete cascade,
+  user_id uuid not null
 );
-alter table spendspacey_web.hidden_wallets enable row level security;
-revoke all on spendspacey_web.hidden_wallets from public, anon, authenticated, service_role;
+alter table spendspacey_web.wallet_creators enable row level security;
+revoke all on spendspacey_web.wallet_creators from public, anon, authenticated, service_role;
+
 create function public.create_web_wallet(p_wallet_id uuid, p_name text, p_currency text)
 returns uuid
 language plpgsql security definer set search_path = ''
@@ -32,15 +32,18 @@ begin
     returning id into created_id;
 
   if created_id is not null then
+    insert into spendspacey_web.wallet_creators (wallet_id, user_id)
+      values (created_id, caller);
     return created_id;
   end if;
 
   -- A retry after a lost response returns the caller's already-created wallet.
   if exists (
     select 1 from public.wallets w
-    where w.id = p_wallet_id and w.created_by = caller
+    join spendspacey_web.wallet_creators c on c.wallet_id = w.id
+    where w.id = p_wallet_id and c.user_id = caller
       and w.name = btrim(p_name) and w.currency = p_currency
-      and public.is_wallet_member(w.id)
+      and exists (select 1 from public.wallet_members m where m.wallet_id = w.id and m.user_id = caller)
   ) then
     return p_wallet_id;
   end if;
@@ -48,52 +51,78 @@ begin
 end;
 $$;
 
-create function public.list_web_hidden_wallets()
+create function public.list_web_created_wallets()
 returns table (wallet_id uuid)
 language sql stable security definer set search_path = ''
 as $$
-  select h.wallet_id
-  from spendspacey_web.hidden_wallets h
-  where h.user_id = auth.uid()
-    and public.is_wallet_member(h.wallet_id)
-  order by h.wallet_id;
+  select c.wallet_id
+  from spendspacey_web.wallet_creators c
+  join public.wallet_members m on m.wallet_id = c.wallet_id and m.user_id = c.user_id
+  where c.user_id = auth.uid()
+  order by c.wallet_id;
 $$;
 
-create function public.set_web_wallet_hidden(p_wallet_id uuid, p_hidden boolean)
+create function public.list_web_wallet_members(p_wallet_id uuid)
+returns table (user_id uuid, display_name text, email text)
+language sql stable security definer set search_path = ''
+as $$
+  select m.user_id, p.display_name, u.email::text
+  from public.wallet_members m
+  left join public.profiles p on p.id = m.user_id
+  left join auth.users u on u.id = m.user_id
+  where m.wallet_id = p_wallet_id and exists (
+    select 1 from public.wallet_members caller
+    where caller.wallet_id = p_wallet_id and caller.user_id = auth.uid()
+  )
+  order by m.joined_at, m.user_id;
+$$;
+
+create function public.delete_web_personal_wallet(p_wallet_id uuid, p_expected_actor uuid)
 returns uuid
 language plpgsql security definer set search_path = ''
 as $$
 declare
   caller uuid := auth.uid();
 begin
-  if caller is null or p_hidden is null or not public.is_wallet_member(p_wallet_id) then
-    raise exception 'web_wallet_unavailable' using errcode = '42501';
+  if caller is null or caller is distinct from p_expected_actor then
+    raise exception 'web_wallet_actor_changed' using errcode = '42501';
   end if;
 
-  if p_hidden then
-    if exists (
-      select 1 from public.wallet_members m
-      where m.wallet_id = p_wallet_id and m.user_id <> caller
-    ) then
-      raise exception 'web_wallet_not_personal' using errcode = '42501';
-    end if;
-    insert into spendspacey_web.hidden_wallets (user_id, wallet_id)
-      values (caller, p_wallet_id)
-      on conflict do nothing;
-  else
-    delete from spendspacey_web.hidden_wallets h
-      where h.user_id = caller and h.wallet_id = p_wallet_id;
+  -- A membership insert takes a conflicting key-share lock through its wallet FK.
+  perform 1 from public.wallets w
+    join spendspacey_web.wallet_creators c on c.wallet_id = w.id
+    where w.id = p_wallet_id and c.user_id = caller
+    for update of w;
+  if not found then
+    raise exception 'web_wallet_not_deletable' using errcode = '42501';
   end if;
+
+  -- Hold the caller's membership until deletion commits.
+  perform 1 from public.wallet_members m
+    where m.wallet_id = p_wallet_id and m.user_id = caller
+    for key share;
+  if not found or exists (
+    select 1 from public.wallet_members m
+    where m.wallet_id = p_wallet_id and m.user_id <> caller
+  ) then
+    raise exception 'web_wallet_not_deletable' using errcode = '42501';
+  end if;
+
+  -- Delete the wallet's transactions before the category cascades reach RESTRICT links.
+  delete from public.transactions where wallet_id = p_wallet_id;
+  delete from public.wallets where id = p_wallet_id;
   return p_wallet_id;
 end;
 $$;
 
 revoke execute on function public.create_web_wallet(uuid, text, text) from public, anon, service_role;
-revoke execute on function public.list_web_hidden_wallets() from public, anon, service_role;
-revoke execute on function public.set_web_wallet_hidden(uuid, boolean) from public, anon, service_role;
+revoke execute on function public.list_web_created_wallets() from public, anon, service_role;
+revoke execute on function public.list_web_wallet_members(uuid) from public, anon, service_role;
+revoke execute on function public.delete_web_personal_wallet(uuid, uuid) from public, anon, service_role;
 grant execute on function public.create_web_wallet(uuid, text, text) to authenticated;
-grant execute on function public.list_web_hidden_wallets() to authenticated;
-grant execute on function public.set_web_wallet_hidden(uuid, boolean) to authenticated;
+grant execute on function public.list_web_created_wallets() to authenticated;
+grant execute on function public.list_web_wallet_members(uuid) to authenticated;
+grant execute on function public.delete_web_personal_wallet(uuid, uuid) to authenticated;
 
 create function public.save_web_transaction(
   p_expected_actor uuid,

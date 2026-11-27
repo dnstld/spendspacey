@@ -32,14 +32,14 @@ function WalletForm({
   active,
   online,
   onSave,
-  onVisibilityChange,
+  onDelete,
   onCancel,
 }: {
   wallet?: Wallet;
   active?: boolean;
   online: boolean;
   onSave: (name: string, currency: Currency, id: string) => Promise<void>;
-  onVisibilityChange?: (hidden: boolean) => Promise<void>;
+  onDelete?: () => Promise<void>;
   onCancel?: () => void;
 }) {
   const [name, setName] = useState(wallet?.name ?? '');
@@ -90,7 +90,6 @@ function WalletForm({
           aria-label={wallet ? `Gerenciar ${wallet.name}` : 'Criar carteira'}
         >
           {active && <Badge variant="secondary">Carteira ativa</Badge>}
-          {wallet?.hidden && <Badge variant="secondary">Oculta no app web</Badge>}
           <Field>
             <FieldLabel>
               Nome da carteira
@@ -134,22 +133,12 @@ function WalletForm({
           {error && !confirm && (
             <FinanceState
               kind="error"
-              title="Não foi possível atualizar a carteira"
+              title="Carteira não salva"
               description="Confira a conexão e tente novamente."
             />
           )}
           <div className="flex items-center justify-between gap-2">
-            {wallet?.hidden && onVisibilityChange && (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!online || busy}
-                onClick={() => void run(() => onVisibilityChange(false))}
-              >
-                Mostrar no app web
-              </Button>
-            )}
-            {wallet && !wallet.hidden && onVisibilityChange && (
+            {onDelete && (
               <AlertDialog
                 open={confirm}
                 onOpenChange={(open) => {
@@ -160,37 +149,38 @@ function WalletForm({
                 }}
               >
                 <AlertDialogTrigger asChild>
-                  <Button type="button" variant="ghost" disabled={!online || busy}>
-                    Ocultar carteira no app web
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={!online || busy}
+                    className="text-destructive"
+                  >
+                    Excluir carteira
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Ocultar {wallet?.name} no app web?</AlertDialogTitle>
+                    <AlertDialogTitle>Excluir {wallet?.name}?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      A carteira sai do seletor do app web. Você pode mostrá-la novamente em
-                      Carteiras.
+                      A carteira e seus registros serão excluídos permanentemente. A exclusão também
+                      aparece no Contas.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   {error && (
                     <FinanceState
                       kind="error"
-                      title="Não foi possível ocultar a carteira"
+                      title="Não foi possível excluir a carteira"
                       description="Confirme que esta é uma carteira pessoal e tente novamente."
                     />
                   )}
                   <AlertDialogFooter>
                     <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
                     <Button
+                      variant="destructive"
                       disabled={!online || busy}
-                      onClick={() =>
-                        void run(async () => {
-                          await onVisibilityChange(true);
-                          setConfirm(false);
-                        })
-                      }
+                      onClick={() => void run(onDelete)}
                     >
-                      Ocultar carteira no app web
+                      Excluir carteira
                     </Button>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -218,6 +208,7 @@ function WalletForm({
 export function Wallets({
   wallets,
   activeId,
+  userId,
   client,
   online,
   change,
@@ -225,6 +216,7 @@ export function Wallets({
 }: {
   wallets: Wallet[];
   activeId?: string;
+  userId: string;
   client: SupabaseClient;
   online: boolean;
   change: (id?: string) => void;
@@ -272,13 +264,13 @@ export function Wallets({
             );
             change();
           }}
-          onVisibilityChange={
-            wallet.hidden || wallet.memberIds.length === 1
-              ? async (hidden) => {
+          onDelete={
+            wallet.deletable
+              ? async () => {
                   checked(
-                    await client.rpc('set_web_wallet_hidden', {
+                    await client.rpc('delete_web_personal_wallet', {
                       p_wallet_id: wallet.id,
-                      p_hidden: hidden,
+                      p_expected_actor: userId,
                     }),
                   );
                   change();

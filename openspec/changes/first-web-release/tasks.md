@@ -17,8 +17,8 @@
 ## 3. Existing accounts and wallets
 
 - [x] 3.1 Verify the configured project, existing family enrollment boundary, Contas schema and migration ownership using code and hosted metadata. Record the compatible wallet/member/finance contract, the effective creation cap, and rollout order without capturing private rows.
-- [ ] 3.2 Review the proposed web-only database objects for uncapped creation, private visibility preferences, and safe transaction saves. Record database verification under the project owner’s control.
-- [x] 3.3 Wire real membership-scoped wallet selection and wallet forms, including BRL default, immutable currency, active indicator, independent save, and confirmation before hiding an eligible personal wallet. Verify access isolation, active selection after creation or hiding, and restoration with synthetic accounts.
+- [ ] 3.2 Review the proposed web-only database objects for uncapped creation, verified creator records and permanent personal-wallet deletion, and safe transaction saves. Record database verification under the project owner’s control.
+- [x] 3.3 Wire real membership-scoped wallet selection and wallet forms, including BRL default, immutable currency, active indicator, independent save, and confirmation before deleting an eligible personal wallet. Verify access isolation, rechecking eligibility at deletion time, and active selection after creation or deletion with synthetic accounts.
 
 ## 4. Transactions and categories
 

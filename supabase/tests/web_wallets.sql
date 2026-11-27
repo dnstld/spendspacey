@@ -9,8 +9,9 @@ insert into auth.users (id, email) values
 do $$
 begin
   if has_function_privilege('anon', 'public.create_web_wallet(uuid,text,text)', 'EXECUTE')
-    or has_function_privilege('anon', 'public.list_web_hidden_wallets()', 'EXECUTE')
-    or has_function_privilege('anon', 'public.set_web_wallet_hidden(uuid,boolean)', 'EXECUTE')
+    or has_function_privilege('anon', 'public.list_web_created_wallets()', 'EXECUTE')
+    or has_function_privilege('anon', 'public.delete_web_personal_wallet(uuid,uuid)', 'EXECUTE')
+    or has_function_privilege('anon', 'public.list_web_wallet_members(uuid)', 'EXECUTE')
     or has_schema_privilege('authenticated', 'spendspacey_web', 'USAGE')
     or has_function_privilege('anon', 'public.save_web_transaction(uuid,uuid,uuid,boolean,jsonb)', 'EXECUTE') then
     raise exception 'Web-only objects have unexpected grants';
@@ -43,11 +44,15 @@ begin
     or not public.is_wallet_member(target_wallet) then
     raise exception 'Creation did not set currency and initial membership';
   end if;
-  perform public.set_web_wallet_hidden(target_wallet, true);
-  perform public.set_web_wallet_hidden(target_wallet, true);
-  if (select count(*) from public.list_web_hidden_wallets() h where h.wallet_id = target_wallet) <> 1 then
-    raise exception 'Hidden wallet missing or duplicated after retry';
+  if (select count(*) from public.list_web_created_wallets() h where h.wallet_id = target_wallet) <> 1
+    or (select count(*) from public.list_web_created_wallets()) <> 1 then
+    raise exception 'Web creator list should contain the web wallet only';
   end if;
+  begin
+    perform public.delete_web_personal_wallet(target_wallet, '10000000-0000-4000-8000-000000000002');
+    raise exception 'Deletion accepted the wrong actor';
+  exception when insufficient_privilege then null;
+  end;
   begin
     perform public.create_web_wallet(gen_random_uuid(), 'Inválida', 'GBP');
     raise exception 'Invalid currency accepted';
@@ -73,8 +78,8 @@ declare
   target_wallet uuid := '20000000-0000-4000-8000-000000000004';
 begin
   begin
-    perform public.set_web_wallet_hidden(target_wallet, true);
-    raise exception 'A shared wallet could be hidden';
+    perform public.delete_web_personal_wallet(target_wallet, auth.uid());
+    raise exception 'A shared wallet could be deleted';
   exception when insufficient_privilege then null;
   end;
   perform set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000002', true);
@@ -82,8 +87,11 @@ begin
   if not exists (select 1 from public.wallets where id = target_wallet and name = 'Renamed' and show_revenue) then
     raise exception 'Contas rename or display preference was denied';
   end if;
-  if exists (select 1 from public.list_web_hidden_wallets()) then
-    raise exception 'Another member could read the owner preference';
+  if exists (select 1 from public.list_web_created_wallets()) then
+    raise exception 'Another member could read the owner creator record';
+  end if;
+  if (select count(*) from public.list_web_wallet_members(target_wallet)) <> 2 then
+    raise exception 'Web roster did not return both current members';
   end if;
 end
 $$;
@@ -172,16 +180,44 @@ begin
   exception when raise_exception then
     if sqlerrm <> 'on_behalf_of must be a member of the wallet' then raise; end if;
   end;
-  perform public.set_web_wallet_hidden(target_wallet, false);
-  if exists (select 1 from public.list_web_hidden_wallets() h where h.wallet_id = target_wallet) then
-    raise exception 'Wallet visibility could not be restored';
+  -- The same caller belongs to native-created wallets, but has no trusted web creator record for them.
+  begin
+    perform public.delete_web_personal_wallet(
+      (select id from public.wallets where name = 'Primeira'), owner);
+    raise exception 'A wallet without verified creator provenance could be deleted';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- The former member can neither read the roster nor delete under their own session.
+  perform set_config('request.jwt.claim.sub', other_member::text, true);
+  if exists (select 1 from public.list_web_wallet_members(target_wallet)) then
+    raise exception 'A former member could read the roster';
   end if;
-  perform public.set_web_wallet_hidden(target_wallet, true);
-  if not exists (select 1 from public.list_web_hidden_wallets() h where h.wallet_id = target_wallet)
-    or not exists (select 1 from public.wallets where id = target_wallet)
-    or not public.is_wallet_member(target_wallet)
-    or not exists (select 1 from public.transactions where id = target_transaction) then
-    raise exception 'Web hiding changed shared data or failed to save the preference';
+  begin
+    perform public.delete_web_personal_wallet(target_wallet, other_member);
+    raise exception 'A former member could delete the wallet';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('request.jwt.claim.sub', owner::text, true);
+
+  if public.delete_web_personal_wallet(target_wallet, owner) <> target_wallet then
+    raise exception 'Personal wallet deletion failed';
+  end if;
+end
+$$;
+
+reset role;
+do $$
+declare
+  target_wallet uuid := '20000000-0000-4000-8000-000000000004';
+begin
+  if exists (select 1 from public.wallets where id = target_wallet)
+    or exists (select 1 from public.wallet_members where wallet_id = target_wallet)
+    or exists (select 1 from public.transactions where wallet_id = target_wallet)
+    or exists (select 1 from public.categories where wallet_id = target_wallet)
+    or exists (select 1 from public.category_items where wallet_id = target_wallet)
+    or exists (select 1 from spendspacey_web.wallet_creators where wallet_id = target_wallet) then
+    raise exception 'Permanent deletion left dependent records';
   end if;
 end
 $$;

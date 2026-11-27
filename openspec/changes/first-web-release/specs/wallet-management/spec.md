@@ -28,17 +28,17 @@ Wallet creation SHALL require a nonblank name and a currency in BRL, USD, or EUR
 
 ### Requirement: Independent wallet settings
 
-Carteiras SHALL show a full-width form for each wallet with a name field, visible read-only currency, its own save action, and an active indicator on the selected wallet. Nova carteira SHALL add an inline creation form. Eligible personal wallets SHALL expose a hide action with explicit confirmation. Hidden wallets SHALL remain in Carteiras with a restore action. The visibility preference SHALL apply to the current account in the web app only. Shared wallets SHALL have no hide action.
+Carteiras SHALL show a full-width form for each wallet with a name field, visible read-only currency, its own save action, and an active indicator on the selected wallet. Nova carteira SHALL add an inline creation form. Spendspacey SHALL expose permanent deletion with explicit confirmation for web-created wallets when the authenticated creator is their sole member. The server SHALL recheck both conditions while holding the wallet lock. Both clients SHALL reflect the deletion of shared records.
 
 #### Scenario: Manage an inactive wallet
 - **WHEN** the user renames an inactive wallet
 - **THEN** the rename appears in its card and selector while the current selection stays active
 
-#### Scenario: Hide a personal wallet
-- **WHEN** the user confirms hiding a personal wallet and the server confirms it
-- **THEN** that wallet disappears from the account's web selector and its records remain intact
-- **AND** if it was active, the app selects an available wallet
+#### Scenario: Delete a personal wallet
+- **WHEN** the verified creator confirms permanent deletion of a web-created wallet and is still its sole member
+- **THEN** the wallet and its transactions are removed from the shared data
+- **AND** if it was active, the web app selects an available wallet
 
-#### Scenario: Restore a hidden wallet
-- **WHEN** the user restores a hidden wallet from Carteiras
-- **THEN** that wallet becomes available in the account's web selector
+#### Scenario: Membership changes during deletion
+- **WHEN** another member joins a wallet before the server's deletion check
+- **THEN** deletion is denied and the wallet and its records remain available

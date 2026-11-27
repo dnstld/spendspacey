@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FinanceHeader, FinanceDock } from './chrome';
 import { Categories } from './categories';
@@ -54,8 +54,7 @@ export function FinanceWorkspace({
       document.removeEventListener('visibilitychange', refreshOnForeground);
     };
   }, [online, revalidateAccess, pollAccess]);
-  const { data: allWallets } = list;
-  const wallets = useMemo(() => allWallets?.filter((wallet) => !wallet.hidden) ?? [], [allWallets]);
+  const wallets = list.data ?? [];
   const active = wallets.find((wallet) => wallet.id === selected) ?? wallets[0];
   const { start, end } = periodRange(period);
   const activeId = active?.id;
@@ -131,7 +130,7 @@ export function FinanceWorkspace({
   ) : !active ? (
     <FinanceState
       title="Nenhuma carteira"
-      description="Crie uma carteira ou mostre novamente uma carteira oculta em Carteiras."
+      description="Crie uma carteira para começar a registrar suas transações."
       action={{ label: 'Gerenciar carteiras', run: () => navigate('wallets') }}
     />
   ) : details.error ? (
@@ -186,8 +185,9 @@ export function FinanceWorkspace({
             <>
               {unavailable && (!online || list.error || !list.data) && unavailable}
               <Wallets
-                wallets={online ? (list.data ?? []) : []}
+                wallets={online ? wallets : []}
                 activeId={activeId}
+                userId={userId}
                 client={client}
                 online={online && !!list.data}
                 change={updateWallets}

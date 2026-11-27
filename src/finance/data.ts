@@ -19,7 +19,7 @@ async function allRows<T>(page: (from: number, to: number) => PromiseLike<Result
 }
 
 export async function readWallets(client: SupabaseClient, userId: string, signal: AbortSignal) {
-  const [rows, hidden] = await Promise.all([
+  const [rows, deletable] = await Promise.all([
     allRows((from, to) =>
       client
         .from('wallet_members')
@@ -31,7 +31,7 @@ export async function readWallets(client: SupabaseClient, userId: string, signal
         .abortSignal(signal)
         .returns<
           {
-            wallets: Omit<Wallet, 'memberIds' | 'hidden'> & {
+            wallets: Omit<Wallet, 'memberIds' | 'deletable'> & {
               wallet_members: { user_id: string }[];
             };
           }[]
@@ -39,7 +39,7 @@ export async function readWallets(client: SupabaseClient, userId: string, signal
     ),
     allRows<{ wallet_id: string }>((from, to) =>
       client
-        .rpc('list_web_hidden_wallets')
+        .rpc('list_web_created_wallets')
         .range(from, to)
         .abortSignal(signal)
         .then(({ data, error }) => ({
@@ -48,10 +48,10 @@ export async function readWallets(client: SupabaseClient, userId: string, signal
         })),
     ),
   ]);
-  const hiddenIds = new Set(hidden.map(({ wallet_id }) => wallet_id));
+  const ownedIds = new Set(deletable.map(({ wallet_id }) => wallet_id));
   return rows.map(({ wallets: { wallet_members, ...wallet } }) => ({
     ...wallet,
-    hidden: hiddenIds.has(wallet.id),
+    deletable: wallet_members.length === 1 && ownedIds.has(wallet.id),
     memberIds: wallet_members.map(({ user_id }) => user_id).sort(),
   }));
 }
@@ -79,7 +79,7 @@ export function readWalletData(client: SupabaseClient, walletId: string, signal:
         .returns<CategoryItem[]>(),
     ),
     client
-      .rpc('list_wallet_members', { p_wallet_id: walletId })
+      .rpc('list_web_wallet_members', { p_wallet_id: walletId })
       .abortSignal(signal)
       .then(({ data, error }) => {
         if (error || !Array.isArray(data)) throw error || new Error('Participantes indisponíveis.');

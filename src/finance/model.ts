@@ -7,7 +7,7 @@ export interface Wallet {
   id: string;
   name: string;
   currency: Currency;
-  hidden: boolean;
+  deletable: boolean;
   memberIds: string[];
 }
 

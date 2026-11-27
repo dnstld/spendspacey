@@ -9,10 +9,10 @@ Spendspacey already delivers a hosted, installable sign-in and profile shell. Th
 - Build the approved Transações, Categorias, and Carteiras screens with the stock Radix/New York shadcn/ui components. Use the fixed wallet and period controls, three-destination floating menu, separate add button, and centered desktop content column from the approved mockup.
 - Show current-period expenses and income totals, date-grouped transactions, and the Contas add/edit flow. Include duplicate confirmation, reusable descriptions with expected-amount autofill, and recording on behalf of an existing wallet member.
 - Add period-scoped category totals and transaction counts, a two-column card grid, category creation and editing, and a filtered transaction modal for each category.
-- Let existing members select wallets and create named wallets with immutable BRL, USD, or EUR currency. Default new wallets to BRL and select them after creation. Support renaming and reversible web-only hiding of eligible personal wallets. Remove the wallet creation ceiling through a new web-only function.
+- Let existing members select wallets and create named wallets with immutable BRL, USD, or EUR currency. Default new wallets to BRL and select them after creation. Support renaming and permanent deletion of eligible personal wallets created through Spendspacey. Remove the wallet creation ceiling through a new web-only function.
 - **BREAKING** Use Brazilian Portuguese for the entire application, removing English selection and fallback. Continue formatting amounts according to each wallet's currency.
 - Preserve a signed-in experience during connectivity loss, with a reconnect notice and unavailable API actions. Keep private financial data out of durable browser caches and write queues.
-- Release scope excludes invitations and membership administration, wallet deletion, the Para onde vai screen, charts, balance, monthly goals, forecasts, and recurrence scheduling. Reusable descriptions belong to a single category.
+- Release scope excludes invitations and membership administration, shared-wallet deletion, the Para onde vai screen, charts, balance, monthly goals, forecasts, and recurrence scheduling. Reusable descriptions belong to a single category.
 
 ## Capabilities
 

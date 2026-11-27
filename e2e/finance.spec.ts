@@ -62,7 +62,7 @@ test('preserves a transaction draft through item autofill, a failed save, and du
   expect(auth.finance.rows.filter((row) => row.amount_cents === 4200)).toHaveLength(2);
 });
 
-test('creates a fourth wallet and hides and restores it in the web workspace', async ({
+test('deletes a web-created personal wallet only while the creator is its sole member', async ({
   page,
   auth,
 }) => {
@@ -75,9 +75,10 @@ test('creates a fourth wallet and hides and restores it in the web workspace', a
   await expect(
     page
       .getByRole('form', { name: 'Gerenciar Família' })
-      .getByRole('button', { name: 'Ocultar carteira no app web' }),
+      .getByRole('button', { name: 'Excluir carteira' }),
   ).toHaveCount(0);
   const inactive = page.getByRole('form', { name: 'Gerenciar Viagem' });
+  await expect(inactive.getByRole('button', { name: 'Excluir carteira' })).toHaveCount(0);
   await inactive.getByLabel('Nome da carteira').fill('Viagem de férias');
   await inactive.getByRole('button', { name: 'Salvar', exact: true }).click();
   await expect(page.getByRole('form', { name: 'Gerenciar Viagem de férias' })).toBeVisible();
@@ -91,16 +92,23 @@ test('creates a fourth wallet and hides and restores it in the web workspace', a
   const preferences = page.getByRole('form', { name: 'Gerenciar Poupança' });
   await expect(preferences.getByLabel('Moeda')).toHaveAttribute('readonly', '');
   expect(auth.finance.wallets).toHaveLength(4);
-  await preferences.getByRole('button', { name: 'Ocultar carteira no app web' }).click();
-  await page
-    .getByRole('alertdialog')
-    .getByRole('button', { name: 'Ocultar carteira no app web' })
-    .click();
+  const wallet = auth.finance.wallets.find((value) => value.name === 'Poupança')!;
+  const transaction = { ...auth.finance.rows[0], id: 'savings-expense', wallet_id: wallet.id };
+  auth.finance.rows.push(transaction);
+  await preferences.getByRole('button', { name: 'Excluir carteira' }).click();
+  const confirm = page.getByRole('alertdialog').getByRole('button', { name: 'Excluir carteira' });
+  wallet.memberIds.push(familyMember);
+  await confirm.click();
+  await expect(page.getByText('Não foi possível excluir a carteira')).toBeVisible();
+  expect(auth.finance.wallets).toContain(wallet);
+  expect(auth.finance.rows).toContain(transaction);
+
+  wallet.memberIds.pop();
+  await confirm.click();
   await expect(page.getByRole('combobox', { name: 'Carteira ativa' })).toHaveText('Família');
-  await expect(preferences.getByText('Oculta no app web')).toBeVisible();
-  expect(auth.finance.wallets).toHaveLength(4);
-  await preferences.getByRole('button', { name: 'Mostrar no app web' }).click();
-  await expect(preferences.getByText('Oculta no app web')).toHaveCount(0);
+  await expect(preferences).toHaveCount(0);
+  expect(auth.finance.wallets).toHaveLength(3);
+  expect(auth.finance.rows).not.toContain(transaction);
 });
 
 test('keeps the signed-in workspace and blocks API writes while offline', async ({

@@ -29,7 +29,7 @@ Use the existing root document and callback ownership model. Start the signed-in
 
 ### Align the web data contract with Contas
 
-Use the configured project's existing Auth, records, read projections, and membership enforcement. Add web entry points for creating wallets and saving transactions. The web creation function uses the existing membership bootstrap trigger and imposes no count ceiling. Wallet visibility is a per-account preference stored in a private web schema. A member can hide a personal wallet and restore it later. Existing Contas definitions, policies, and grants are preserved.
+Use the configured project's existing Auth, records, read projections, and membership enforcement. Give the web its own RPCs for wallet creation and deletion, creator and member lookup, and transaction saves. The web creation function uses the existing membership bootstrap trigger and imposes no count ceiling. It records the authenticated creator in a private schema. Permanent deletion requires this record and sole membership, verified under a wallet lock so a concurrent join cannot be missed. The deletion removes shared records and is reflected in both clients. Existing Contas definitions, policies, and grants are preserved.
 
 Current member attribution is required by the existing transaction trigger. If the historical beneficiary has left the wallet, the form asks the user to set a current beneficiary or explicitly clear the field. The project owner controls verification and execution of the additive web migration.
 

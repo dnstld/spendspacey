@@ -18,7 +18,7 @@ const memberNames: Record<string, string> = {
 };
 
 export function isFinancePath(path: string) {
-  return /^\/rest\/v1\/(?:wallet_members|wallets|categories|category_items|transactions|rpc\/(?:list_wallet_members|create_web_wallet|list_web_hidden_wallets|set_web_wallet_hidden|save_web_transaction))$/.test(
+  return /^\/rest\/v1\/(?:wallet_members|wallets|categories|category_items|transactions|rpc\/(?:list_web_wallet_members|create_web_wallet|list_web_created_wallets|delete_web_personal_wallet|save_web_transaction))$/.test(
     path,
   );
 }
@@ -29,11 +29,11 @@ export function financeFixture() {
       id: 'shared',
       name: 'Família',
       currency: 'BRL',
-      hidden: false,
+      deletable: false,
       memberIds: [owner, familyMember],
     },
-    { id: 'dollars', name: 'Viagem', currency: 'USD', hidden: false, memberIds: [owner] },
-    { id: 'euros', name: 'Europa', currency: 'EUR', hidden: false, memberIds: [owner] },
+    { id: 'dollars', name: 'Viagem', currency: 'USD', deletable: false, memberIds: [owner] },
+    { id: 'euros', name: 'Europa', currency: 'EUR', deletable: false, memberIds: [owner] },
   ];
   const categories: (Category & { wallet_id: string })[] = [
     { id: 'market', name: 'Mercado', type: 'expense', archived_at: null, wallet_id: 'shared' },
@@ -97,7 +97,7 @@ export function financeFixture() {
             },
           })),
         );
-      case '/rest/v1/rpc/list_wallet_members': {
+      case '/rest/v1/rpc/list_web_wallet_members': {
         const wallet = wallets.find((value) => value.id === request.postDataJSON().p_wallet_id);
         return json(
           wallet?.memberIds.map((user_id) => ({
@@ -114,23 +114,33 @@ export function financeFixture() {
             id: p_wallet_id,
             name: p_name,
             currency: p_currency,
-            hidden: false,
+            deletable: true,
             memberIds: [owner],
           });
         }
         return json(p_wallet_id);
       }
-      case '/rest/v1/rpc/list_web_hidden_wallets':
+      case '/rest/v1/rpc/list_web_created_wallets':
         return json(
-          wallets.filter((wallet) => wallet.hidden).map((wallet) => ({ wallet_id: wallet.id })),
+          wallets.filter((wallet) => wallet.deletable).map((wallet) => ({ wallet_id: wallet.id })),
         );
-      case '/rest/v1/rpc/set_web_wallet_hidden': {
-        const { p_wallet_id, p_hidden } = request.postDataJSON();
-        const wallet = wallets.find((wallet) => wallet.id === p_wallet_id);
-        if (!wallet || (p_hidden && wallet.memberIds.length !== 1)) {
-          return route.fulfill({ status: 403, json: { code: '42501' } });
+      case '/rest/v1/rpc/delete_web_personal_wallet': {
+        const { p_wallet_id, p_expected_actor } = request.postDataJSON();
+        const index = wallets.findIndex(
+          (wallet) =>
+            wallet.id === p_wallet_id &&
+            wallet.deletable &&
+            wallet.memberIds.length === 1 &&
+            wallet.memberIds.includes(p_expected_actor) &&
+            p_expected_actor === owner,
+        );
+        if (index < 0) return route.fulfill({ status: 403, json: { code: '42501' } });
+        wallets.splice(index, 1);
+        for (const records of [rows, categories, items]) {
+          for (let i = records.length - 1; i >= 0; i--) {
+            if (records[i].wallet_id === p_wallet_id) records.splice(i, 1);
+          }
         }
-        wallet.hidden = p_hidden;
         return json(p_wallet_id);
       }
       case '/rest/v1/wallets': {
